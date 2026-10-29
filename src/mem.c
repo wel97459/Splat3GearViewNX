@@ -77,9 +77,20 @@ static bool scan_for_gacha(const uint8_t* buf, size_t n, uint64_t base, int64_t*
             for (int k = 0; k < 5; k++)
                 if (w == keys[k]) { hits++; break; }
         }
-        if (hits >= 2) {
-            *found = (int64_t)(base + i);
-            return true;
+        // Strong check: exact structure - key at chunk start, all 5 distinct keys
+        // present at STRUCT_SIZE stride (matches the game's real block layout)
+        if (hits >= 4) {
+            uint32_t seen = 0;
+            for (uint32_t o = 0; o < GACHA_SIZE; o += GACHA_STRUCT_SIZE) {
+                uint32_t w = (uint32_t)win[o] | ((uint32_t)win[o+1] << 8) |
+                             ((uint32_t)win[o+2] << 16) | ((uint32_t)win[o+3] << 24);
+                for (int k = 0; k < 5; k++)
+                    if (w == keys[k]) seen |= 1u << k;
+            }
+            if (seen == 0x1F) {
+                *found = (int64_t)(base + i);
+                return true;
+            }
         }
     }
     return false;

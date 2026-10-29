@@ -95,9 +95,25 @@ static void read_all(void) {
             snprintf(g_status, sizeof(g_status), "ERROR reading %s: %s", TYPE_NAMES[t], status ? status : "?");
             return;
         }
+        if (count == 0) {
+            // Diagnose: show what's actually at the list start
+            uint8_t dbg[0x20];
+            char hex[0x20 * 3 + 8] = "";
+            if (mem_read(bases[t] + 0x40, dbg, sizeof(dbg)) == 0) {
+                for (size_t i = 0; i < sizeof(dbg); i++)
+                    snprintf(hex + i * 3, 4, "%02X ", dbg[i]);
+            } else {
+                snprintf(hex, sizeof(hex), "unreadable");
+            }
+            snprintf(g_status, sizeof(g_status), "%s: 0 found @%08llX+40: %s",
+                     TYPE_NAMES[t], (unsigned long long)bases[t], hex);
+            show_gear();
+            return;
+        }
         g_gear_count += count;
     }
-    snprintf(g_status, sizeof(g_status), "Done. %d gear%s", g_gear_count, seedinfo);
+    snprintf(g_status, sizeof(g_status), "Done. %d gear (delta %llX)%s",
+             g_gear_count, (long long)delta, seedinfo);
 }
 
 static void dump(void) {
