@@ -53,20 +53,38 @@ static void read_all(void) {
     }
     g_attached = true;
 
+    // Resolve heap shift: try the hardcoded address first; if unmapped, scan the heap
+    int64_t delta = 0;
+    uint8_t probe[0x10];
+    uint64_t raddr = 0, rsize = 0; uint32_t rtype = 0, rperm = 0;
+    if (mem_read(GACHA_BLOCK, probe, sizeof(probe)) != 0) {
+        snprintf(g_status, sizeof(g_status), "Fixed address unmapped, scanning heap...");
+        show_gear();
+        if (mem_query(GACHA_BLOCK, &raddr, &rsize, &rtype, &rperm) == 0)
+            snprintf(g_status, sizeof(g_status), "map@%08llX: %08llX sz=%08llX t=%u p=%u - scanning...",
+                     (unsigned long long)GACHA_BLOCK, (unsigned long long)raddr,
+                     (unsigned long long)rsize, rtype, rperm);
+        show_gear();
+        int64_t found = mem_locate_gacha();
+        if (found < 0) {
+            snprintf(g_status, sizeof(g_status), "ERROR: gacha block not found in heap. Wrong game version?");
+            return;
+        }
+        delta = found - (int64_t)GACHA_BLOCK;
+        snprintf(g_status, sizeof(g_status), "Heap shifted by %llX, reading...", (long long)delta);
+        show_gear();
+    }
+
     // Gacha seeds
     GachaSeed seeds[8];
-    uint64_t gacha_base = GACHA_BLOCK;
+    uint64_t gacha_base = GACHA_BLOCK + delta;
     int nseeds = gacha_read(gacha_base, seeds, 8);
-    if (nseeds <= 0) {
-        gacha_base = GACHA_BLOCK + DLC_OFFS;
-        nseeds = gacha_read(gacha_base, seeds, 8);
-    }
     char seedinfo[64] = "";
     if (nseeds > 0)
         snprintf(seedinfo, sizeof(seedinfo), " (seeds: %d, %08X)", nseeds, seeds[0].s0);
 
     // Gear lists
-    uint64_t bases[3] = { GEARLIST_HEAD, GEARLIST_CLOTHES, GEARLIST_SHOES };
+    uint64_t bases[3] = { GEARLIST_HEAD + delta, GEARLIST_CLOTHES + delta, GEARLIST_SHOES + delta };
     for (int t = 0; t < 3; t++) {
         snprintf(g_status, sizeof(g_status), "Reading %s...", TYPE_NAMES[t]);
         show_gear();

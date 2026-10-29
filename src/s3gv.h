@@ -55,6 +55,8 @@ typedef struct {
 int mem_attach(void);       // attach to current app; 0 on success
 void mem_detach(void);      // detach
 int mem_read(uint64_t addr, void* buf, size_t size); // 0 on success
+int mem_query(uint64_t addr, uint64_t* raddr, uint64_t* rsize, uint32_t* rtype, uint32_t* rperm);
+int64_t mem_locate_gacha(void); // heap-scan for the gacha key block; -1 if not found
 
 // ---- Gear parsing ----
 bool gear_validate(const uint8_t* d);
