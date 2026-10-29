@@ -73,6 +73,26 @@ static void read_all(void) {
     }
     g_attached = true;
 
+    // Environment diagnostics (sys-botbase style): heap base, NSO base, game version
+    uint64_t heap_base = mem_heap_base();
+    uint64_t nso_base = mem_main_nso_base();
+    u64 title_id = 0;
+    u32 game_version = 0;
+    NsApplicationContentMetaStatus meta[4];
+    s32 nmeta = 0;
+    if (R_FAILED(nsListApplicationContentMetaStatus(0, 0, meta, 4, &nmeta))) nmeta = 0;
+    for (s32 i = 0; i < nmeta; i++) {
+        if (meta[i].version > game_version) game_version = meta[i].version;
+        title_id = meta[i].application_id;
+    }
+    game_version /= 0x10000;
+    app_log("env: heap_base=%llX nso_base=%llX title=%016llX ver=%u.%u.%u",
+            (unsigned long long)heap_base, (unsigned long long)nso_base,
+            (unsigned long long)title_id,
+            game_version / 100, (game_version / 10) % 10, game_version % 10);
+    app_log("env: fixed GACHA_BLOCK=%llX GEARLIST_HEAD=%llX (author console addresses)",
+            (unsigned long long)GACHA_BLOCK, (unsigned long long)GEARLIST_HEAD);
+
     // Resolve heap shift: validate the fixed gacha address by content, not just
     // by whether the read succeeds (heap regions are GBs; a wrong address still maps).
     int64_t delta = 0;

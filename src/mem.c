@@ -38,6 +38,24 @@ int mem_read(uint64_t addr, void* buf, size_t size) {
     return R_FAILED(rc) ? -1 : 0;
 }
 
+uint64_t mem_heap_base(void) {
+    if (!g_attached) return 0;
+    u64 heap = 0;
+    Result rc = svcGetInfo(&heap, InfoType_HeapRegionAddress, g_debug, 0);
+    return R_FAILED(rc) ? 0 : heap;
+}
+
+uint64_t mem_main_nso_base(void) {
+    if (!g_attached) return 0;
+    u64 pid = 0;
+    if (R_FAILED(get_app_pid(&pid))) return 0;
+    LoaderModuleInfo mods[2];
+    s32 num = 0;
+    Result rc = ldrDmntGetProcessModuleInfo(pid, mods, 2, &num);
+    if (R_FAILED(rc) || num == 0) return 0;
+    return mods[num - 1].base_address;
+}
+
 // Query the mapped region containing (or following) addr. 0 on success.
 int mem_query(uint64_t addr, uint64_t* raddr, uint64_t* rsize, uint32_t* rtype, uint32_t* rperm) {
     if (!g_attached) return -1;
