@@ -10,6 +10,7 @@
 #define RAW_PATH "sdmc:/switch/Splat3GearViewNX/gearlist.bin"
 
 static uint64_t g_gacha_addr = 0;   // gacha block address found this read
+static uint64_t g_worn_addr[3] = {0, 0, 0}; // addresses of found worn records
 uint16_t g_loadout[3] = {0, 0, 0}; // worn gear IDs (head/clothes/shoes), 0 = unknown
 GearInfo g_worn_info[3];          // full parsed records for the worn items (seed etc.)
 static char g_status[128] = "Press A to read gear from memory";
@@ -187,6 +188,7 @@ static void read_loadout(void) {
                                 g_worn_info[t].rarity, g_worn_info[t].primary,
                                 g_worn_info[t].subs[0], g_worn_info[t].subs[1],
                                 g_worn_info[t].subs[2], g_worn_info[t].exp);
+                        g_worn_addr[t] = p1 + o;
                     }
                 }
             }
@@ -239,12 +241,19 @@ static void dump_raw(void) {
         return;
     }
     g_attached = true;
+    uint64_t anchor = g_gacha_addr;
+    uint64_t minrec = 0;
+    for (int t = 0; t < 3; t++)
+        if (g_worn_addr[t] && (minrec == 0 || g_worn_addr[t] < minrec)) minrec = g_worn_addr[t];
+    if (minrec) anchor = minrec; // records live OUTSIDE the gacha region
     uint64_t raddr = 0, rsize = 0; uint32_t rt = 0, rp = 0;
-    mem_query(g_gacha_addr, &raddr, &rsize, &rt, &rp);
-    app_log("dump region of gacha: %llX sz %llX", (unsigned long long)raddr, (unsigned long long)rsize);
-    uint64_t want = g_gacha_addr - 0x1000000; // 16MB before
+    mem_query(anchor, &raddr, &rsize, &rt, &rp);
+    app_log("dump region of anchor %llX: %llX sz %llX", (unsigned long long)anchor,
+            (unsigned long long)raddr, (unsigned long long)rsize);
+    uint64_t want = anchor - 0x800000; // 8MB before the anchor
     uint64_t start = want > raddr ? want : raddr; // clamp to mapped region
-    uint64_t total = g_gacha_addr + 0x200000 - start; // end 2MB after gacha
+    uint64_t total = 0x1200000; // up to 18MB
+    if (raddr && start + total > raddr + rsize) total = raddr + rsize - start;
     FILE* f = fopen(RAW_PATH, "wb");
     if (!f) { snprintf(g_status, sizeof(g_status), "Open failed: %s", RAW_PATH); return; }
     static uint8_t buf[0x100000];
@@ -258,7 +267,7 @@ static void dump_raw(void) {
     }
     fclose(f);
     app_log("raw dump %llX..%llX -> %s", (unsigned long long)start, (unsigned long long)good_end, RAW_PATH);
-    snprintf(g_status, sizeof(g_status), "Raw %uMB @%08llX (gacha at +16MB)",
+    snprintf(g_status, sizeof(g_status), "Raw %uMB @%08llX",
              (unsigned)(done >> 20), (unsigned long long)start);
     show_gear();
     if (g_attached) mem_detach();
