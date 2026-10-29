@@ -33,7 +33,7 @@ Export format matches upstream exactly: `MainSkill` remap (≥ IntensifyAction �
 export DEVKITPRO=/opt/devkitpro DEVKITA64=/opt/devkitpro/devkitA64
 make          # NRO (this repo)
 ```
-Requires devkitPro devkitA64 + libnx. The overlay build lives in `repos/Splat3GearViewNX-ovl` and links libtesla/libultra (cloned to `repos/libultrahand`; its download helper is stubbed out so no curl/mbedtls portlibs are needed).
+Requires devkitPro devkitA64 + libnx.
 
 ## Offline analysis
 
@@ -41,7 +41,7 @@ Requires devkitPro devkitA64 + libnx. The overlay build lives in `repos/Splat3Ge
 
 ## Not ported
 
-- Tableturf grind macro — needs virtual controller input, which requires a sysmodule (sys-botbase style). Not possible from an applet NRO or overlay.
+- Tableturf grind macro — needs virtual controller input, which requires a sysmodule (sys-botbase style). Not possible from an applet NRO.
 - Full inventory browsing UI — records are findable (see above), UI not built.
 
 ## Notes
