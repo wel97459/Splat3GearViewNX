@@ -155,6 +155,45 @@ static void read_loadout(void) {
                 break;
             }
         }
+        // Two-level chase: each record pointer targets an ARRAY of pointers
+        // (seen in logs: ptr targets hold more 0x2E/0x69-style pointers).
+        // Deref every entry, scan each for a gear struct at 4-byte offsets.
+        static uint8_t l1[0x200];
+        for (int i = 0; i < nptr; i++) {
+            if (mem_read(ptrs[i], l1, sizeof l1) != 0) continue;
+            int chased = 0;
+            for (int a = 0; a + 8 <= (int)sizeof l1; a += 8) {
+                uint64_t p1 = 0;
+                for (int k = 7; k >= 0; k--) p1 = (p1 << 8) | l1[a + k];
+                if (p1 < 0x1000000000ULL || p1 >= 0x800000000000ULL) continue;
+                uint8_t l2[0x40];
+                if (mem_read(p1, l2, sizeof l2) != 0) continue;
+                chased++;
+                for (int o = 0; o + 4 <= (int)sizeof l2; o += 4) {
+                    uint16_t gid = l2[o] | (l2[o + 1] << 8);
+                    if (!gid) continue;
+                    for (int t = 0; t < 3; t++) {
+                        if (gid != g_loadout[t] || g_worn_info[t].id) continue;
+                        uint8_t fb2[GEAR_SIZE];
+                        if (mem_read(p1 + o, fb2, GEAR_SIZE) != 0) break;
+                        if (!gear_validate(fb2)) {
+                            app_log("chase ptr[%d]->%llX+0x%X: id %u matches worn[%d] but invalid", i,
+                                    (unsigned long long)p1, o, gid, t);
+                            continue;
+                        }
+                        gear_parse(&g_worn_info[t], fb2, t);
+                        app_log("worn[%d] via chase ptr[%d]->%llX+0x%X: seed %08X rar %u main %u sub %u/%u/%u exp %u",
+                                t, i, (unsigned long long)p1, o, g_worn_info[t].seed,
+                                g_worn_info[t].rarity, g_worn_info[t].primary,
+                                g_worn_info[t].subs[0], g_worn_info[t].subs[1],
+                                g_worn_info[t].subs[2], g_worn_info[t].exp);
+                    }
+                }
+            }
+            app_log("chase ptr[%d] %llX: %d level-2 pointers dereferenced", i,
+                    (unsigned long long)ptrs[i], chased);
+        }
+
         // fallback: content search if pointers didn't yield everything
         for (int t = 0; t < 3; t++) {
             if (g_loadout[t] && g_worn_info[t].id == 0 && gear_find_struct(t, g_loadout[t], &g_worn_info[t]))
