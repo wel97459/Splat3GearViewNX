@@ -127,23 +127,30 @@ static void read_loadout(void) {
                     if (soff == 0) app_log("ptr[%d] %llX unmapped", i, (unsigned long long)ptrs[i]);
                     continue;
                 }
-                uint8_t gb[GEAR_SIZE];
-                if (mem_read(target, gb, GEAR_SIZE) != 0) continue;
-                uint16_t gid = gb[0] | (gb[1] << 8);
-                if (gid == 0) continue;
-                for (int t = 0; t < 3; t++) {
-                    if (gid != g_loadout[t] || g_worn_info[t].id != 0) continue;
-                    if (!gear_validate(gb)) {
-                        app_log("ptr[%d] %llX+0x%X: id %u matches worn[%d] but invalid struct", i,
-                                (unsigned long long)ptrs[i], soff, gid, t);
-                        continue;
+                uint8_t gb[0x20];
+                if (mem_read(target, gb, sizeof gb) != 0) continue;
+                char hex[3 * 0x20 + 8] = "";
+                for (int k = 0; k < 0x20; k++)
+                    snprintf(hex + k * 3, 4, "%02X ", gb[k]);
+                app_log("ptr[%d] %llX+0x%X t%u: %s", i, (unsigned long long)ptrs[i], soff, tt, hex);
+                // try as gear struct right here and at 0xB0-strided array entries
+                for (int goff = 0; goff < 0x100; goff += GEAR_SIZE) {
+                    uint8_t fb2[GEAR_SIZE];
+                    if (mem_read(target + goff, fb2, GEAR_SIZE) != 0) break;
+                    uint16_t gid = fb2[0] | (fb2[1] << 8);
+                    if (gid == 0) continue;
+                    for (int t = 0; t < 3; t++) {
+                        if (gid != g_loadout[t] || g_worn_info[t].id != 0) continue;
+                        if (!gear_validate(fb2)) {
+                            app_log("ptr[%d]+0x%X g%02X: id %u matches worn[%d] but invalid", i, soff, goff, gid, t);
+                            continue;
+                        }
+                        gear_parse(&g_worn_info[t], fb2, t);
+                        app_log("worn[%d] via ptr[%d]+0x%X+0x%02X: seed %08X rar %u main %u sub %u/%u/%u exp %u",
+                                t, i, soff, goff, g_worn_info[t].seed, g_worn_info[t].rarity,
+                                g_worn_info[t].primary, g_worn_info[t].subs[0],
+                                g_worn_info[t].subs[1], g_worn_info[t].subs[2], g_worn_info[t].exp);
                     }
-                    gear_parse(&g_worn_info[t], gb, t);
-                    app_log("worn[%d] via ptr[%d] %llX+0x%X: seed %08X rar %u main %u sub %u/%u/%u exp %u",
-                            t, i, (unsigned long long)ptrs[i], soff, g_worn_info[t].seed,
-                            g_worn_info[t].rarity, g_worn_info[t].primary,
-                            g_worn_info[t].subs[0], g_worn_info[t].subs[1],
-                            g_worn_info[t].subs[2], g_worn_info[t].exp);
                 }
                 break;
             }
