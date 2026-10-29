@@ -181,62 +181,55 @@ static void read_all(int use_delta) {
              g_gear_count, (long long)delta, seedinfo);
 }
 
-// Minus: continue scanning for the current type's list after the last found address
+// Minus: scan all three gear types, anchored on known owned-gear IDs first
 static void rescan_next(void) {
-    if (g_last_found == 0) { snprintf(g_status, sizeof(g_status), "Nothing scanned yet."); return; }
-    int t = g_last_type;
-    snprintf(g_status, sizeof(g_status), "Scanning %s after last match...", TYPE_NAMES[t]);
+    static const uint16_t ANCHOR_IDS[3] = { 1029, 8034, 3001 }; // Coral Cap / Fancyfish Stitch / Orange Arrows
+    snprintf(g_status, sizeof(g_status), "Scanning for owned gear (ID anchors)...");
     show_gear();
     if (mem_attach() != 0) {
         snprintf(g_status, sizeof(g_status), "ERROR: could not attach.");
         return;
     }
     g_attached = true;
-    uint64_t start = g_last_found + GEAR_SIZE;
-    static const uint16_t ANCHOR_IDS[3] = { 1029, 8034, 3001 }; // Coral Cap / Fancyfish Stitch / Orange Arrows
-    int inv_len = 0;
-    int64_t found = gear_locate_id(t, ANCHOR_IDS[t], &inv_len);
-    const char* how = "id-scan";
-    if (found < 0) {
-        found = gear_locate_inventory(t, &inv_len, start);
-        how = "inventory-scan";
-    }
-    if (found < 0) { found = gear_locate_list(t, start); how = "list-scan"; }
-    if (found < 0) {
-        snprintf(g_status, sizeof(g_status), "%s: no further match found", TYPE_NAMES[t]);
-        app_log("%s: rescan after %llX found nothing", TYPE_NAMES[t], (unsigned long long)start);
+    static GearInfo out[MAX_GEAR];
+    int total = 0;
+    int counts[3] = {0, 0, 0};
+    for (int t = 0; t < 3; t++) {
+        snprintf(g_status, sizeof(g_status), "Scanning %s (anchor ID %u)...", TYPE_NAMES[t], ANCHOR_IDS[t]);
         show_gear();
-        if (g_attached) mem_detach();
-        return;
+        int run_len = 0;
+        int64_t found = gear_locate_id(t, ANCHOR_IDS[t], &run_len);
+        const char* how = "id-scan";
+        if (found < 0) {
+            found = gear_locate_inventory(t, &run_len, 0);
+            how = "inventory-scan";
+        }
+        if (found < 0) { found = gear_locate_list(t, 0); how = "list-scan"; }
+        if (found < 0) {
+            app_log("%s: scan found nothing", TYPE_NAMES[t]);
+            continue;
+        }
+        const char* status = NULL;
+        int count = 0;
+        if (!gear_read_list(out + total, MAX_GEAR - total, (uint64_t)found, 0, t, &status, &count) || count == 0) {
+            app_log("%s: %s @%llX but read failed: %s", TYPE_NAMES[t], how,
+                    (unsigned long long)found, status ? status : "?");
+            continue;
+        }
+        app_log("%s: %s @%llX (run %d) -> %d gear", TYPE_NAMES[t], how,
+                (unsigned long long)found, run_len, count);
+        counts[t] = count;
+        total += count;
+        g_last_found = (uint64_t)found;
+        g_last_type = t;
     }
-    g_last_found = (uint64_t)found;
-    app_log("%s: rescan %s @%llX (len %d)", TYPE_NAMES[t], how,
-            (unsigned long long)found, inv_len);
-    // Read the new list into a temp buffer
-    static GearInfo tmp[128];
-    const char* status = NULL;
-    int count = 0;
-    if (!gear_read_list(tmp, 128, (uint64_t)found, 0, t, &status, &count) || count == 0) {
-        snprintf(g_status, sizeof(g_status), "ERROR: rescan read failed: %s", status ? status : "?");
-        show_gear();
-        if (g_attached) mem_detach();
-        return;
-    }
-    // Replace this type's segment in the main array
-    int s = g_type_start[t], oldc = g_type_count[t];
-    int tail = g_gear_count - (s + oldc);
-    int newc = count;
-    int shift = newc - oldc;
-    if (shift != 0 && tail > 0)
-        memmove(g_gears + s + newc, g_gears + s + oldc, tail * sizeof(GearInfo));
-    memcpy(g_gears + s, tmp, newc * sizeof(GearInfo));
-    g_type_count[t] = newc;
-    g_gear_count += shift;
-    // Fix up start offsets of later types
-    for (int u = t + 1; u < 3; u++) g_type_start[u] += shift;
-    if (g_index >= g_gear_count) g_index = g_gear_count ? g_gear_count - 1 : 0;
-    snprintf(g_status, sizeof(g_status), "%s: %d gear @%llX (%s)", TYPE_NAMES[t], newc,
-             (unsigned long long)found, how);
+    memcpy(g_gears, out, total * sizeof(GearInfo));
+    g_gear_count = total;
+    int s = 0;
+    for (int t = 0; t < 3; t++) { g_type_start[t] = s; g_type_count[t] = counts[t]; s += counts[t]; }
+    g_index = 0;
+    snprintf(g_status, sizeof(g_status), "Scanned: %d gear (h%d c%d s%d)", total,
+             counts[0], counts[1], counts[2]);
     show_gear();
     if (g_attached) mem_detach();
 }
