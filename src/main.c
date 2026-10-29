@@ -106,12 +106,17 @@ static void read_loadout(void) {
         for (int t = 0; t < 3; t++) {
             memset(&g_worn_info[t], 0, sizeof(GearInfo));
             g_worn_info[t].id = g_loadout[t];
-            if (g_loadout[t] && gear_find_struct(t, g_loadout[t], &g_worn_info[t]))
+            if (g_loadout[t] && gear_find_struct(t, g_loadout[t], &g_worn_info[t])) {
                 app_log("worn[%d] full record: seed %08X rar %u main %u sub %u/%u/%u exp %u",
                         t, g_worn_info[t].seed, g_worn_info[t].rarity,
                         g_worn_info[t].primary, g_worn_info[t].subs[0],
                         g_worn_info[t].subs[1], g_worn_info[t].subs[2],
                         g_worn_info[t].exp);
+                char hex[3 * 0x2C + 8] = "";
+                for (int i = 0x50; i < 0x7C; i++)
+                    snprintf(hex + (i - 0x50) * 3, 4, "%02X ", g_worn_info[t].raw[i]);
+                app_log("worn[%d] raw 0x50..0x7C: %s", t, hex);
+            }
         }
         const GearDataEntry* h = gear_data_find(0, g_loadout[0]);
         const GearDataEntry* c = gear_data_find(1, g_loadout[1]);

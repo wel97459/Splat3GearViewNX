@@ -32,11 +32,15 @@ void gear_parse(GearInfo* g, const uint8_t* data, uint8_t gear_type) {
     g->id = rd16(data, 0x00);
     g->exp = rd16(data, 0x48);
     g->rarity = data[0x50];
-    g->primary = data[0x54];
+    uint32_t p32 = rd32(data, 0x54);
+    g->primary = (p32 <= 26) ? p32 : data[0x54];
     g->sub_count = data[0x68];
-    g->subs[0] = data[0x6C];
-    g->subs[1] = data[0x70];
-    g->subs[2] = data[0x74];
+    for (int i = 0; i < 3; i++) {
+        uint32_t s32 = rd32(data, 0x6C + i * 4);
+        uint8_t v = (s32 <= 26) ? (uint8_t)s32 : data[0x6C + i * 4];
+        // only report slots the game has actually unlocked
+        g->subs[i] = (i < g->sub_count) ? v : 0xFF; // 0xFF = empty slot
+    }
     g->seed = rd32(data, 0x80);
     g->name = g->brand = g->rowid = "???";
     const GearDataEntry* e = gear_data_find(gear_type, g->id);
@@ -77,6 +81,7 @@ static const char* ABILITY_NAMES[] = {
 };
 
 const char* ability_name(int id) {
+    if (id == 0xFF) return "(empty)";
     if (id >= 0 && id <= 26) return ABILITY_NAMES[id];
     return "???";
 }

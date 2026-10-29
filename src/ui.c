@@ -252,13 +252,14 @@ static void clip_text(char* out, size_t outsz, const char* str, int px, int maxw
 }
 
 void ui_draw(const char* status) {
-    (void)status;
     load_icons();
     uint32_t* fb = fb_begin();
     if (!fb) return;
     fill(fb, RGBA8_MAXALPHA(0x14, 0x16, 0x1c));
 
     draw_text_sized(fb, 40, 24, RGBA8_MAXALPHA(0x6e, 0xe7, 0x60), 34, "Splat3GearView NX");
+    if (status && status[0])
+        draw_text_sized(fb, 480, 32, RGBA8_MAXALPHA(0x9a, 0xa3, 0xb5), 22, status);
 
     // 3 worn cards
     static const char* LN[3] = { "Head", "Clothes", "Shoes" };
