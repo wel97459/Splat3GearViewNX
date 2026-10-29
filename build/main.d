@@ -1,5 +1,6 @@
 main.o: /home/tvmini/repos/Splat3GearViewNX/src/main.c \
  /home/tvmini/repos/Splat3GearViewNX/src/s3gv.h \
+ /home/tvmini/repos/Splat3GearViewNX/src/generated/gear_tables.h \
  /opt/devkitpro/libnx/include/switch.h \
  /opt/devkitpro/libnx/include/switch/types.h \
  /opt/devkitpro/libnx/include/switch/result.h \
@@ -174,6 +175,7 @@ main.o: /home/tvmini/repos/Splat3GearViewNX/src/main.c \
  /opt/devkitpro/libnx/include/switch/crypto/hmac.h \
  /opt/devkitpro/libnx/include/switch/crypto/crc.h
 /home/tvmini/repos/Splat3GearViewNX/src/s3gv.h:
+/home/tvmini/repos/Splat3GearViewNX/src/generated/gear_tables.h:
 /opt/devkitpro/libnx/include/switch.h:
 /opt/devkitpro/libnx/include/switch/types.h:
 /opt/devkitpro/libnx/include/switch/result.h:
