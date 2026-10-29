@@ -193,9 +193,14 @@ static void rescan_next(void) {
     }
     g_attached = true;
     uint64_t start = g_last_found + GEAR_SIZE;
+    static const uint16_t ANCHOR_IDS[3] = { 1029, 8034, 3001 }; // Coral Cap / Fancyfish Stitch / Orange Arrows
     int inv_len = 0;
-    int64_t found = gear_locate_inventory(t, &inv_len, start);
-    const char* how = "inventory-scan";
+    int64_t found = gear_locate_id(t, ANCHOR_IDS[t], &inv_len);
+    const char* how = "id-scan";
+    if (found < 0) {
+        found = gear_locate_inventory(t, &inv_len, start);
+        how = "inventory-scan";
+    }
     if (found < 0) { found = gear_locate_list(t, start); how = "list-scan"; }
     if (found < 0) {
         snprintf(g_status, sizeof(g_status), "%s: no further match found", TYPE_NAMES[t]);
@@ -249,8 +254,12 @@ static void dump_raw(void) {
         return;
     }
     g_attached = true;
-    uint64_t start = g_gacha_addr - 0x1000000; // 16MB before
-    uint64_t total = 0x1200000;                // +2MB after = 18MB
+    uint64_t raddr = 0, rsize = 0; uint32_t rt = 0, rp = 0;
+    mem_query(g_gacha_addr, &raddr, &rsize, &rt, &rp);
+    app_log("dump region of gacha: %llX sz %llX", (unsigned long long)raddr, (unsigned long long)rsize);
+    uint64_t want = g_gacha_addr - 0x1000000; // 16MB before
+    uint64_t start = want > raddr ? want : raddr; // clamp to mapped region
+    uint64_t total = g_gacha_addr + 0x200000 - start; // end 2MB after gacha
     FILE* f = fopen(RAW_PATH, "wb");
     if (!f) { snprintf(g_status, sizeof(g_status), "Open failed: %s", RAW_PATH); return; }
     static uint8_t buf[0x100000];

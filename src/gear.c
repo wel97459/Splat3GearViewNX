@@ -204,6 +204,62 @@ int64_t gear_locate_inventory(int type, int* out_len, uint64_t start) {
     return -1;
 }
 
+// Scan heap regions for a valid gear struct with a specific known ID (e.g. a
+// piece the user actually owns), then expand to the full run boundaries.
+// Returns the run start address, sets *out_len. -1 if not found.
+int64_t gear_locate_id(int type, uint16_t want, int* out_len) {
+    uint64_t addr = 0x8000000ULL;
+    static uint8_t buf[0x10000];
+    if (out_len) *out_len = 0;
+    while (addr != 0) {
+        uint64_t raddr, rsize;
+        uint32_t rtype, rperm;
+        if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return -1;
+        if (addr != raddr) addr = raddr;
+        bool readable = (rperm & Perm_R) != 0;
+        bool is_heap = (rtype == MemType_Heap);
+        if (readable && is_heap && rsize >= 0x100000) {
+            uint64_t pos = 0;
+            while (pos < rsize) {
+                size_t n = rsize - pos;
+                if (n > sizeof(buf)) n = sizeof(buf);
+                if (mem_read(raddr + pos, buf, n) == 0) { pos += n; continue; }
+                for (size_t o = 0; o + GEAR_SIZE <= n; o++) {
+                    uint16_t id = buf[o] | (buf[o+1] << 8);
+                    if (id != want) continue;
+                    if (!gear_validate(buf + o)) continue;
+                    uint64_t cand = raddr + pos + o;
+                    // Expand backward: previous struct valid?
+                    uint64_t run_start = cand;
+                    uint8_t prev[GEAR_SIZE];
+                    for (int k = 1; k <= 64; k++) {
+                        if (mem_read(cand - (uint64_t)k * GEAR_SIZE, prev, GEAR_SIZE) != 0) break;
+                        if (!gear_validate(prev)) break;
+                        run_start = cand - (uint64_t)k * GEAR_SIZE;
+                    }
+                    // Expand forward
+                    int len = (int)((cand - run_start) / GEAR_SIZE) + 1;
+                    uint8_t nxt[GEAR_SIZE];
+                    for (;;) {
+                        if (mem_read(run_start + (uint64_t)len * GEAR_SIZE, nxt, GEAR_SIZE) != 0) break;
+                        if (!gear_validate(nxt)) break;
+                        len++;
+                        if (len > 256) break;
+                    }
+                    if (out_len) *out_len = len;
+                    return (int64_t)run_start;
+                }
+                pos += n;
+                if (n == sizeof(buf) && pos < rsize) pos -= GEAR_SIZE;
+            }
+        }
+        uint64_t next = raddr + rsize;
+        if (next <= addr) break;
+        addr = next;
+    }
+    return -1;
+}
+
 // leanny.github.io/splat3seedchecker settings format
 bool dump_json(const char* path, const GearInfo* gears, int count) {
     FILE* f = fopen(path, "w");
