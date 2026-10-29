@@ -2,16 +2,31 @@
 #include <switch.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 
 #define NRO_PATH_OUT "sd:/switch/Splat3GearViewNX/dump.json"
+#define LOG_PATH "sd:/switch/Splat3GearViewNX/log.txt"
+#define RAW_PATH "sd:/switch/Splat3GearViewNX/gearlist.bin"
 
 static GearInfo g_gears[MAX_GEAR];
 static int g_gear_count = 0;
 static int g_index = 0;
+static int64_t g_delta = 0;
 static char g_status[128] = "Press A to read gear from memory";
 static bool g_attached = false;
 
 static const char* TYPE_NAMES[3] = { "Headgear", "Clothes", "Shoes" };
+
+static void app_log(const char* fmt, ...) {
+    FILE* f = fopen(LOG_PATH, "a");
+    if (!f) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fclose(f);
+}
 
 static void show_gear(void) {
     consoleClear();
@@ -44,10 +59,12 @@ static void show_gear(void) {
 static void read_all(void) {
     g_gear_count = 0;
     g_index = 0;
+    app_log("---- read start ----");
     snprintf(g_status, sizeof(g_status), "Attaching to game...");
     show_gear();
 
     if (mem_attach() != 0) {
+        app_log("ERROR: attach failed");
         snprintf(g_status, sizeof(g_status), "ERROR: could not attach. Game must be running (suspended) behind hbmenu.");
         return;
     }
@@ -105,8 +122,10 @@ static void read_all(void) {
             } else {
                 snprintf(hex, sizeof(hex), "unreadable");
             }
+            app_log("%s: 0 found @%llX+40: %s", TYPE_NAMES[t], (unsigned long long)bases[t], hex);
             snprintf(g_status, sizeof(g_status), "%s: 0 found @%08llX+40: %s",
                      TYPE_NAMES[t], (unsigned long long)bases[t], hex);
+            g_delta = delta;
             show_gear();
             return;
         }
@@ -114,6 +133,32 @@ static void read_all(void) {
     }
     snprintf(g_status, sizeof(g_status), "Done. %d gear (delta %llX)%s",
              g_gear_count, (long long)delta, seedinfo);
+}
+
+// Y: dump a raw memory window around the (shifted) gear list for offline analysis
+static void dump_raw(void) {
+    if (!g_attached) {
+        snprintf(g_status, sizeof(g_status), "Attach first (X).");
+        return;
+    }
+    uint64_t base = GEARLIST_HEAD + g_delta;
+    #define RAW_BEFORE 0x8000
+    const uint64_t BEFORE = RAW_BEFORE;
+#define RAW_LEN 0x40000
+    const uint64_t LEN = RAW_LEN;
+    static uint8_t buf[RAW_LEN];
+    if (mem_read(base - BEFORE, buf, LEN) != 0) {
+        snprintf(g_status, sizeof(g_status), "Raw read failed @%08llX", (unsigned long long)(base - BEFORE));
+        return;
+    }
+    FILE* f = fopen(RAW_PATH, "wb");
+    if (!f) { snprintf(g_status, sizeof(g_status), "Open failed: %s", RAW_PATH); return; }
+    fwrite(buf, 1, LEN, f);
+    fclose(f);
+    app_log("raw dump %llX..%llX -> %s", (unsigned long long)(base - BEFORE),
+         (unsigned long long)(base - BEFORE + LEN), RAW_PATH);
+    snprintf(g_status, sizeof(g_status), "Raw dump -> %s (list at +0x%X)",
+             RAW_PATH, (unsigned)(BEFORE + 0x40));
 }
 
 static void dump(void) {
@@ -144,6 +189,7 @@ int main(void) {
             if (g_attached) mem_detach();
         }
         if (k & HidNpadButton_X) dump();
+        if (k & HidNpadButton_Y) dump_raw();
         if (g_gear_count > 0) {
             if (k & HidNpadButton_R) g_index = (g_index + 1) % g_gear_count;
             if (k & HidNpadButton_L) g_index = (g_index + g_gear_count - 1) % g_gear_count;
