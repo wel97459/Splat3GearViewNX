@@ -55,7 +55,7 @@ static void show_gear(void) {
     }
 
     printf("\n\x1b[2mControls:\n"
-           "  A: read   Up: raw fixed   -: ID scan (all types)\n"
+           "  A: read   ZR: hunt IDs   -: ID scan\n"
            "  Y: raw mem dump   L/R: prev/next   B(+): exit\x1b[0m\n");
     consoleUpdate(NULL);
 }
@@ -181,6 +181,66 @@ static void read_all(int use_delta) {
              g_gear_count, (long long)delta, seedinfo);
 }
 
+// Debug: hunt for the raw u16 values of the anchor gear IDs in ALL readable
+// regions, logging address + surrounding bytes for each hit. Tells us whether
+// the game stores these IDs at all (and in what container).
+static void hunt_ids(void) {
+    static const uint16_t IDS[3] = { 1029, 8034, 3001 };
+    app_log("hunt: starting raw-ID search");
+    if (mem_attach() != 0) { snprintf(g_status, sizeof(g_status), "ERROR: could not attach."); return; }
+    g_attached = true;
+    static uint8_t buf[0x40000];
+    for (int w = 0; w < 3; w++) {
+        uint16_t want = IDS[w];
+        int hits = 0, logged = 0;
+        uint64_t addr = 0x8000000ULL;
+        while (addr != 0) {
+            uint64_t raddr, rsize; uint32_t rtype, rperm;
+            if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) break;
+            if (addr != raddr) addr = raddr;
+            bool readable = (rperm & Perm_R) != 0;
+            bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
+            if (readable && !is_code && rsize >= 0x100000) {
+                uint64_t pos = 0;
+                while (pos < rsize) {
+                    size_t n = rsize - pos;
+                    if (n > sizeof(buf)) n = sizeof(buf);
+                    if (mem_read(raddr + pos, buf, n) == 0) {
+                        for (size_t o = 0; o + 2 <= n; o++) {
+                            if ((buf[o] | (buf[o+1] << 8)) != want) continue;
+                            hits++;
+                            if (logged < 48) {
+                                logged++;
+                                uint64_t ha = raddr + pos + o;
+                                size_t s0 = o >= 8 ? o - 8 : 0;
+                                size_t s1 = o + 24 <= n ? o + 24 : n;
+                                char hex[(24 + 16) * 3 + 8] = "";
+                                for (size_t k = s0; k < s1; k++)
+                                    snprintf(hex + (k - s0) * 3, 4, "%02X ", buf[k]);
+                                app_log("hit %u @%llX (u32=%s) ctx: %s", want,
+                                        (unsigned long long)ha,
+                                        (o + 4 <= n && (buf[o+2] | (buf[o+3] << 8)) == 0) ? "yes" : "no",
+                                        hex);
+                            }
+                        }
+                        pos += n;
+                        if (n == sizeof(buf) && pos < rsize) pos -= 24; // keep context across chunk edge
+                    } else {
+                        pos += n;
+                    }
+                }
+            }
+            uint64_t next = raddr + rsize;
+            if (next <= addr) break;
+            addr = next;
+        }
+        app_log("hunt: ID %u total hits %d", want, hits);
+    }
+    snprintf(g_status, sizeof(g_status), "Hunt done, see log.txt");
+    show_gear();
+    if (g_attached) mem_detach();
+}
+
 // Minus: scan all three gear types, anchored on known owned-gear IDs first
 static void rescan_next(void) {
     static const uint16_t ANCHOR_IDS[3] = { 1029, 8034, 3001 }; // Coral Cap / Fancyfish Stitch / Orange Arrows
@@ -302,6 +362,7 @@ int main(void) {
         }
         if (k & HidNpadButton_X) dump();
         if (k & HidNpadButton_Y) dump_raw();
+        if (k & HidNpadButton_ZR) hunt_ids();
         if (k & HidNpadButton_Minus) rescan_next();
         if (k & HidNpadButton_Up) read_all(0); // raw mode: pure author addresses
         if (g_gear_count > 0) {
