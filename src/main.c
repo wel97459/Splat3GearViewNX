@@ -4,9 +4,9 @@
 #include <string.h>
 #include <stdarg.h>
 
-#define NRO_PATH_OUT "sd:/switch/Splat3GearViewNX/dump.json"
-#define LOG_PATH "sd:/switch/Splat3GearViewNX/log.txt"
-#define RAW_PATH "sd:/switch/Splat3GearViewNX/gearlist.bin"
+#define NRO_PATH_OUT "sdmc:/switch/Splat3GearViewNX/dump.json"
+#define LOG_PATH "sdmc:/switch/Splat3GearViewNX/log.txt"
+#define RAW_PATH "sdmc:/switch/Splat3GearViewNX/gearlist.bin"
 
 static GearInfo g_gears[MAX_GEAR];
 static int g_gear_count = 0;
