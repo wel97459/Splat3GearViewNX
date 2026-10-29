@@ -29,9 +29,9 @@ def load_tables():
     tables = [dict() for _ in range(3)]
     cur = -1
     for line in src.splitlines():
-        m = re.search(r'GearDataHead|GearDataClothes|GearDataShoes', line)
+        m = re.search(r'g_(head|clothes|shoes)_data', line)
         if m:
-            cur = 0 if 'Head' in m.group(0) else 1 if 'Clothes' in m.group(0) else 2
+            cur = {'head': 0, 'clothes': 1, 'shoes': 2}[m.group(1)]
         m = re.match(r'\s*\{\s*(\d+),\s*"([^"]*)",\s*"([^"]*)"', line)
         if m and cur >= 0:
             tables[cur][int(m.group(1))] = (m.group(2), m.group(3))
@@ -88,7 +88,7 @@ def main():
         name, brand = tables[t].get(gid, ("?", "?"))
         subs = ", ".join(ABIL[v] if v <= 26 else f"raw{v}" for v in (s0, s1, s2)[:cnt]) or "-"
         print(f"[{'HC S'[t]}] {name} ({brand})  rar {rar}  main {ABIL[prim]}"
-              f"  subs: {subs}  seed {seed:08X}  x{len(offs)} @ {[hex(o) for o in offs[:4]]}")
+              f"  subs: {subs}  seed {seed:08X}  x{len(offs)} @ {[hex(o[1]) for o in offs[:4]]}")
     print(f"\n{len(groups)} duplicated groups total")
     # also: dump full JSON of duplicated groups for the seed checker
     out = {"HaveGearHeadMap": {}, "HaveGearClothesMap": {}, "HaveGearShoesMap": {}}
