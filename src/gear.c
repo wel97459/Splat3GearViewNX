@@ -204,8 +204,10 @@ int64_t gear_locate_inventory(int type, int* out_len, uint64_t start) {
     return -1;
 }
 
-// Scan heap regions for a valid gear struct with a specific known ID (e.g. a
-// piece the user actually owns), then expand to the full run boundaries.
+// Scan all readable non-code regions for a valid gear struct with a specific
+// known ID (e.g. a piece the user actually owns), then expand to the full run
+// boundaries. The exact-ID requirement makes false positives negligible, so we
+// don't restrict to heap regions (the lists may live in game-mapped memory).
 // Returns the run start address, sets *out_len. -1 if not found.
 int64_t gear_locate_id(int type, uint16_t want, int* out_len) {
     uint64_t addr = 0x8000000ULL;
@@ -217,8 +219,8 @@ int64_t gear_locate_id(int type, uint16_t want, int* out_len) {
         if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return -1;
         if (addr != raddr) addr = raddr;
         bool readable = (rperm & Perm_R) != 0;
-        bool is_heap = (rtype == MemType_Heap);
-        if (readable && is_heap && rsize >= 0x100000) {
+        bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
+        if (readable && !is_code && rsize >= 0x100000) {
             uint64_t pos = 0;
             while (pos < rsize) {
                 size_t n = rsize - pos;
