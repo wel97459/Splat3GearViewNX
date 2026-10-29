@@ -69,6 +69,7 @@ bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out); // fast heap-on
 
 void app_log(const char* fmt, ...);
 extern uint16_t g_loadout[3]; // worn gear IDs (head/clothes/shoes), 0 = unknown
+extern uint64_t g_gear_found_addr; // address of the record gear_find_struct picked
 extern GearInfo g_worn_info[3]; // full parsed records for the worn items
 int ui_init(void);
 void ui_exit(void);

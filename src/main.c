@@ -11,6 +11,7 @@
 
 static uint64_t g_gacha_addr = 0;   // gacha block address found this read
 static uint64_t g_worn_addr[3] = {0, 0, 0}; // addresses of found worn records
+uint64_t g_gear_found_addr = 0; // set by gear_find_struct
 uint16_t g_loadout[3] = {0, 0, 0}; // worn gear IDs (head/clothes/shoes), 0 = unknown
 GearInfo g_worn_info[3];          // full parsed records for the worn items (seed etc.)
 static char g_status[128] = "Press A to read gear from memory";
@@ -204,13 +205,41 @@ static void read_loadout(void) {
             app_log("all 3 worn records resolved via pointer chase; skipping fallback scan");
         } else {
             app_log("fallback scan for %d missing record(s)", need);
-            for (int t = 0; t < 3; t++)
-                if (g_loadout[t] && g_worn_info[t].id == 0 &&
-                    gear_find_struct(t, g_loadout[t], &g_worn_info[t]))
-                    app_log("worn[%d] via fallback content scan: seed %08X rar %u main %u sub %u/%u/%u",
-                            t, g_worn_info[t].seed, g_worn_info[t].rarity,
-                            g_worn_info[t].primary, g_worn_info[t].subs[0],
-                            g_worn_info[t].subs[1], g_worn_info[t].subs[2]);
+            // GEARLIST entries sit at a fixed 0x2C020 stride (upstream
+            // GEARLIST_OFFS): worn records are list neighbors. Resolve the
+            // most distinctive item first (clothes), then DERIVE the others
+            // by stride — far faster and immune to scan junk.
+            static const int order[3] = {1, 0, 2};
+            for (int oi = 0; oi < 3; oi++) {
+                int t = order[oi];
+                if (!(g_loadout[t] && g_worn_info[t].id == 0)) continue;
+                if (gear_find_struct(t, g_loadout[t], &g_worn_info[t])) {
+                    g_worn_addr[t] = g_gear_found_addr;
+                    app_log("worn[%d] via fallback content scan @%llX: seed %08X rar %u main %u sub %u/%u/%u",
+                            t, (unsigned long long)g_gear_found_addr, g_worn_info[t].seed,
+                            g_worn_info[t].rarity, g_worn_info[t].primary,
+                            g_worn_info[t].subs[0], g_worn_info[t].subs[1], g_worn_info[t].subs[2]);
+                }
+                // stride-fill any still-missing slot from any resolved neighbor
+                for (int t2 = 0; t2 < 3; t2++) {
+                    if (!(g_loadout[t2] && g_worn_info[t2].id == 0)) continue;
+                    for (int n = 0; n < 3; n++) {
+                        if (!g_worn_addr[n] || n == t2) continue;
+                        long long delta = ((long long)t2 - (long long)n) * 0x2C020LL;
+                        uint64_t cand = g_worn_addr[n] + (uint64_t)delta;
+                        uint8_t fb2[GEAR_SIZE];
+                        if (mem_read(cand, fb2, GEAR_SIZE) != 0) continue;
+                        uint16_t gid = fb2[0] | (fb2[1] << 8);
+                        if (gid != g_loadout[t2] || !gear_validate(fb2)) continue;
+                        gear_parse(&g_worn_info[t2], fb2, t2);
+                        g_worn_addr[t2] = cand;
+                        app_log("worn[%d] via stride %+lld from worn[%d] @%llX: seed %08X rar %u main %u sub %u/%u/%u",
+                                t2, delta, n, (unsigned long long)cand, g_worn_info[t2].seed,
+                                g_worn_info[t2].rarity, g_worn_info[t2].primary,
+                                g_worn_info[t2].subs[0], g_worn_info[t2].subs[1], g_worn_info[t2].subs[2]);
+                    }
+                }
+            }
         }
         const GearDataEntry* h = gear_data_find(0, g_loadout[0]);
         const GearDataEntry* c = gear_data_find(1, g_loadout[1]);

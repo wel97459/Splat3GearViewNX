@@ -257,6 +257,7 @@ bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
                 (unsigned long long)sigs[best_g].addr);
     }
     // re-parse from the picked address
+    g_gear_found_addr = sigs[best_g].addr;
     uint8_t rec[GEAR_SIZE];
     if (mem_read(sigs[best_g].addr, rec, GEAR_SIZE) != 0) return false;
     if (!gear_validate(rec)) return false;
