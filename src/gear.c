@@ -170,9 +170,12 @@ bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
     uint64_t addr = 0x8000000ULL;
     static uint8_t buf[0x40000];
     int found = 0;
-    int best_score = -1;
-    uint64_t best_addr = 0;
-    GearInfo best_gi;
+    // Real gear records exist as 2+ IDENTICAL copies (same abilities + seed)
+    // at different addresses; junk almost never duplicates exactly.
+    // Collect signatures, then pick the highest-scoring duplicated group.
+    typedef struct { uint8_t prim, cnt, s0, s1, s2; uint32_t seed; uint64_t addr; } Sig;
+    static Sig sigs[512];
+    int nsig = 0;
     while (addr != 0) {
         uint64_t raddr, rsize;
         uint32_t rtype, rperm;
@@ -193,25 +196,21 @@ bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
                         uint8_t prim = buf[o + 0x54];
                         uint8_t scnt = buf[o + 0x68];
                         if (prim < 1 || scnt > 3) continue; // game limits: 3 subs max
-                        // score ONLY unlocked subs; stale bytes beyond sub_count are noise
-                        int score = scnt * 4 + 2;
                         bool subs_ok = true;
-                        for (int i = 0; i < scnt; i++)
-                            if (buf[o + 0x6C + i * 4] < 1 || buf[o + 0x6C + i * 4] > 14) subs_ok = false;
-                        if (subs_ok) score += 2;
-                        uint64_t cand_addr = raddr + pos + o;
-                        if ((cand_addr & 7) == 0) score += 4; // real objects are aligned
-                        found++;
-                        if (score >= 10)
-                            app_log("cand[%d] id %u @%llX: prim %u cnt %u subs %u/%u/%u seed %08X score %d",
-                                    found, id, (unsigned long long)cand_addr, prim, scnt,
-                                    buf[o + 0x6C], buf[o + 0x70], buf[o + 0x74],
-                                    rd32(buf + o, 0x80), score);
-                        if (score > best_score) {
-                            best_score = score;
-                            best_addr = raddr + pos + o;
-                            gear_parse(&best_gi, buf + o, type);
+                        for (int i = 0; i < scnt; i++) {
+                            uint8_t v = buf[o + 0x6C + i * 4];
+                            if (v < 1 || v > 14) subs_ok = false;
                         }
+                        if (!subs_ok) continue;
+                        if (nsig < 512) {
+                            sigs[nsig].prim = prim; sigs[nsig].cnt = scnt;
+                            sigs[nsig].s0 = buf[o + 0x6C]; sigs[nsig].s1 = buf[o + 0x70];
+                            sigs[nsig].s2 = buf[o + 0x74];
+                            sigs[nsig].seed = rd32(buf + o, 0x80);
+                            sigs[nsig].addr = raddr + pos + o;
+                            nsig++;
+                        }
+                        found++;
                     }
                     pos += n;
                     if (n == sizeof(buf) && pos < rsize) pos -= GEAR_SIZE;
@@ -224,9 +223,43 @@ bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
         if (next <= addr) break;
         addr = next;
     }
-    app_log("gear_find_struct type %u id %u: %d candidates, best score %d @%llX",
-            type, id, found, best_score, (unsigned long long)best_addr);
-    if (best_score < 0) return false;
-    *out = best_gi;
+    app_log("gear_find_struct type %u id %u: %d candidates", type, id, found);
+    // group by payload; score each group: subs*4 + aligned bonus per member
+    int best_g = -1, best_score = -1;
+    for (int i = 0; i < nsig; i++) {
+        int dup = 0, sc = 0;
+        for (int j = 0; j < nsig; j++) {
+            if (sigs[j].prim == sigs[i].prim && sigs[j].cnt == sigs[i].cnt &&
+                sigs[j].s0 == sigs[i].s0 && sigs[j].s1 == sigs[i].s1 &&
+                sigs[j].s2 == sigs[i].s2 && sigs[j].seed == sigs[i].seed) {
+                dup++;
+                if ((sigs[j].addr & 7) == 0) sc += 4;
+            }
+        }
+        if (dup < 2) continue; // must exist as 2+ identical copies
+        int score = sigs[i].cnt * 4 + sc;
+        if (score > best_score) { best_score = score; best_g = i; }
+        if (dup == 2 || dup == 3)
+            app_log("dupgroup id %u: prim %u cnt %u subs %u/%u/%u seed %08X x%d score %d",
+                    id, sigs[i].prim, sigs[i].cnt, sigs[i].s0, sigs[i].s1, sigs[i].s2,
+                    sigs[i].seed, dup, score);
+    }
+    if (best_g < 0) {
+        // no duplicated group: fall back to single best-aligned candidate
+        for (int i = 0; i < nsig; i++) {
+            int score = sigs[i].cnt * 4 + ((sigs[i].addr & 7) == 0 ? 4 : 0);
+            if (score > best_score) { best_score = score; best_g = i; }
+        }
+        if (best_g < 0) return false;
+        app_log("no dup group; single best @%llX", (unsigned long long)sigs[best_g].addr);
+    } else {
+        app_log("picked dup group seed %08X @%llX", sigs[best_g].seed,
+                (unsigned long long)sigs[best_g].addr);
+    }
+    // re-parse from the picked address
+    uint8_t rec[GEAR_SIZE];
+    if (mem_read(sigs[best_g].addr, rec, GEAR_SIZE) != 0) return false;
+    if (!gear_validate(rec)) return false;
+    gear_parse(out, rec, type);
     return true;
 }
