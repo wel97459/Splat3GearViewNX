@@ -22,7 +22,7 @@ static bool g_attached = false;
 
 static const char* TYPE_NAMES[3] = { "Headgear", "Clothes", "Shoes" };
 
-static void app_log(const char* fmt, ...) {
+void app_log(const char* fmt, ...) {
     FILE* f = fopen(LOG_PATH, "a");
     if (!f) return;
     va_list ap;
@@ -55,7 +55,7 @@ static void show_gear(void) {
     }
 
     printf("\n\x1b[2mControls:\n"
-           "  A: read   Up: raw fixed   -: rescan from last match\n"
+           "  A: read   Up: raw fixed   -: ID scan (all types)\n"
            "  Y: raw mem dump   L/R: prev/next   B(+): exit\x1b[0m\n");
     consoleUpdate(NULL);
 }
@@ -184,6 +184,7 @@ static void read_all(int use_delta) {
 // Minus: scan all three gear types, anchored on known owned-gear IDs first
 static void rescan_next(void) {
     static const uint16_t ANCHOR_IDS[3] = { 1029, 8034, 3001 }; // Coral Cap / Fancyfish Stitch / Orange Arrows
+    app_log("minus pressed: starting 3-type ID scan");
     snprintf(g_status, sizeof(g_status), "Scanning for owned gear (ID anchors)...");
     show_gear();
     if (mem_attach() != 0) {

@@ -211,7 +211,7 @@ int64_t gear_locate_inventory(int type, int* out_len, uint64_t start) {
 // Returns the run start address, sets *out_len. -1 if not found.
 int64_t gear_locate_id(int type, uint16_t want, int* out_len) {
     uint64_t addr = 0x8000000ULL;
-    static uint8_t buf[0x10000];
+    static uint8_t buf[0x40000];
     if (out_len) *out_len = 0;
     while (addr != 0) {
         uint64_t raddr, rsize;
@@ -255,6 +255,8 @@ int64_t gear_locate_id(int type, uint16_t want, int* out_len) {
                 if (n == sizeof(buf) && pos < rsize) pos -= GEAR_SIZE;
             }
         }
+        app_log("id-scan: walked region %llX..%llX (t=%u)", (unsigned long long)raddr,
+                (unsigned long long)(raddr + rsize), rtype);
         uint64_t next = raddr + rsize;
         if (next <= addr) break;
         addr = next;

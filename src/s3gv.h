@@ -69,6 +69,8 @@ int64_t gear_locate_list(int type, uint64_t start); // heap-scan for a run of va
 int64_t gear_locate_inventory(int type, int* out_len, uint64_t start); // short bounded run = owned gear
 int64_t gear_locate_id(int type, uint16_t want, int* out_len); // find run containing a known owned-gear ID
 
+void app_log(const char* fmt, ...);
+
 // ---- Seeds ----
 int gacha_read(uint64_t base, GachaSeed* out, int max); // returns count
 
