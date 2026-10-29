@@ -52,6 +52,21 @@ static void read_loadout(void) {
         if (nseeds > 0) gacha = GACHA_BLOCK + DLC_OFFS;
     }
     if (!gacha) {
+        // fast: anchor sits at heap_base + 0xBA416F70-ish on every observed
+        // boot (drift <= 0x80). Probe that small window before a full scan.
+        uint64_t hb = mem_heap_base();
+        if (hb) {
+            static const uint64_t inheap[2] = { 0xBA416F70ULL, 0xBA416EF0ULL };
+            for (int i = 0; i < 2 && !gacha; i++)
+                for (int64_t d = -0x200; d <= 0x200 && !gacha; d += 0x80) {
+                    GachaSeed s2[8];
+                    if (gacha_read(hb + inheap[i] + d, s2, 8) > 0)
+                        gacha = hb + inheap[i] + d;
+                }
+            if (gacha) app_log("gacha via heap_base+%llX", (unsigned long long)(gacha - hb));
+        }
+    }
+    if (!gacha) {
         int64_t found = mem_locate_gacha();
         if (found < 0) {
             snprintf(g_status, sizeof(g_status), "ERROR: gacha block not found");
@@ -103,14 +118,62 @@ static void read_loadout(void) {
         app_log("loadout pattern not found in gacha region");
         snprintf(g_status, sizeof(g_status), "Worn gear not found in gacha region");
     } else {
+        // FAST PATH: worn records live in the gear list at stable offsets
+        // relative to the gacha region start (verified across boots):
+        // clothes = region + 0x2EA190; head/shoes = clothes +/- 0x2C020.
+        for (int t = 0; t < 3; t++) memset(&g_worn_info[t], 0, sizeof(GearInfo));
+        uint64_t rbase = found - 0x4F0; // triplet is at region+0x4F0
+        uint64_t cls = 0;
+        uint8_t rec[GEAR_SIZE];
+        uint64_t c1 = rbase + 0x2EA190;
+        if (mem_read(c1, rec, GEAR_SIZE) == 0) {
+            uint16_t gid = rec[0] | (rec[1] << 8);
+            if (gid == g_loadout[1] && gear_validate(rec)) {
+                gear_parse(&g_worn_info[1], rec, 1);
+                cls = c1;
+                g_worn_addr[1] = c1;
+                app_log("worn[1] fast @%llX (region+2EA190): seed %08X rar %u main %u sub %u/%u/%u",
+                        (unsigned long long)c1, g_worn_info[1].seed, g_worn_info[1].rarity,
+                        g_worn_info[1].primary, g_worn_info[1].subs[0],
+                        g_worn_info[1].subs[1], g_worn_info[1].subs[2]);
+            } else {
+                app_log("fast clothes @%llX: id %u (want %u) or invalid", (unsigned long long)c1, gid, g_loadout[1]);
+            }
+        }
+        if (cls) {
+            uint64_t cand[2] = { cls - 0x2C020, cls + 0x2C020 };
+            int tt[2] = { 0, 2 };
+            for (int i = 0; i < 2; i++) {
+                if (g_worn_info[tt[i]].id) continue;
+                if (mem_read(cand[i], rec, GEAR_SIZE) == 0) {
+                    uint16_t gid = rec[0] | (rec[1] << 8);
+                    if (gid == g_loadout[tt[i]] && gear_validate(rec)) {
+                        gear_parse(&g_worn_info[tt[i]], rec, tt[i]);
+                        g_worn_addr[tt[i]] = cand[i];
+                        app_log("worn[%d] fast @%llX (clothes%+lld): seed %08X rar %u main %u sub %u/%u/%u",
+                                tt[i], (unsigned long long)cand[i],
+                                (long long)(cand[i] - cls), g_worn_info[tt[i]].seed,
+                                g_worn_info[tt[i]].rarity, g_worn_info[tt[i]].primary,
+                                g_worn_info[tt[i]].subs[0], g_worn_info[tt[i]].subs[1],
+                                g_worn_info[tt[i]].subs[2]);
+                    } else {
+                        app_log("fast slot %d @%llX: id %u (want %u) or invalid", tt[i],
+                                (unsigned long long)cand[i], gid, g_loadout[tt[i]]);
+                    }
+                }
+            }
+        }
         // The loadout record carries a pointer array just BEFORE the triplet
         // (dump: pointers at triplet-0x50..triplet-0x08). Those point at the
         // real gear objects elsewhere in the heap — dereference them and read
         // the full 0xB0 record at the target, matched by ID.
+        int nmissing = 0;
+        for (int t = 0; t < 3; t++) if (g_loadout[t] && g_worn_info[t].id == 0) nmissing++;
+        app_log("fast path done, %d missing", nmissing);
         uint64_t ptrs[12]; int nptr = 0;
         uint8_t pb[0x60];
         uint64_t pscan = found - 0x60;
-        if (mem_read(pscan, pb, sizeof pb) == 0) {
+        if (nmissing && mem_read(pscan, pb, sizeof pb) == 0) {
             for (int i = 0; i + 8 <= (int)sizeof pb; i += 8) {
                 uint64_t p = 0;
                 for (int k = 7; k >= 0; k--) p = (p << 8) | pb[i + k];
@@ -160,7 +223,7 @@ static void read_loadout(void) {
         // (seen in logs: ptr targets hold more 0x2E/0x69-style pointers).
         // Deref every entry, scan each for a gear struct at 4-byte offsets.
         static uint8_t l1[0x200];
-        for (int i = 0; i < nptr; i++) {
+        for (int i = 0; i < nptr && nmissing; i++) {
             if (mem_read(ptrs[i], l1, sizeof l1) != 0) continue;
             int chased = 0;
             for (int a = 0; a + 8 <= (int)sizeof l1; a += 8) {
@@ -196,14 +259,16 @@ static void read_loadout(void) {
                     (unsigned long long)ptrs[i], chased);
         }
 
+        for (int t = 0; t < 3; t++) if (g_loadout[t] && g_worn_info[t].id == 0) nmissing++;
+        app_log("after chase, %d missing", nmissing);
         // fallback: content search if pointers didn't yield everything.
         // Skip entirely when all 3 are resolved (saves 3 full-heap walks).
         int need = 0;
         for (int t = 0; t < 3; t++) if (g_loadout[t] && g_worn_info[t].id == 0) need++;
         if (need == 0) {
             app_log("all 3 worn records resolved via pointer chase; skipping fallback scan");
-        } else {
-            app_log("fallback scan for %d missing record(s)", need);
+        } else if (nmissing > 0) {
+            app_log("fallback scan for %d missing record(s)", nmissing);
             // GEARLIST entries sit at a fixed 0x2C020 stride (upstream
             // GEARLIST_OFFS): worn records are list neighbors. Resolve the
             // most distinctive item first (clothes), then DERIVE the others
