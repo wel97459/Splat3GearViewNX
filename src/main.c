@@ -15,6 +15,7 @@ static int64_t g_delta = 0;
 static int g_type_start[3] = {0, 0, 0};
 static int g_type_count[3] = {0, 0, 0};
 static uint64_t g_last_found = 0;   // last list address found by scanning
+static uint64_t g_gacha_addr = 0;   // gacha block address found this read
 static int g_last_type = 0;
 static char g_status[128] = "Press A to read gear from memory";
 static bool g_attached = false;
@@ -134,6 +135,8 @@ static void read_all(int use_delta) {
         nseeds = gacha_read(GACHA_BLOCK, seeds, 8);
     }
 
+    g_gacha_addr = GACHA_BLOCK + delta;
+    app_log("gacha anchor @%llX (delta %+llX, seeds %d)", (unsigned long long)g_gacha_addr, (long long)delta, nseeds);
     char seedinfo[64] = "";
     if (nseeds > 0)
         snprintf(seedinfo, sizeof(seedinfo), " (seeds: %d, %08X)", nseeds, seeds[0].s0);
@@ -233,30 +236,38 @@ static void rescan_next(void) {
     if (g_attached) mem_detach();
 }
 
-// Y: dump a raw memory window around the (shifted) gear list for offline analysis
+// Y: dump a raw memory window around the FOUND gacha block for offline analysis.
+// In the author's layout the gear lists sit ~15.5MB below the gacha block.
+// 18MB total so it can be sent back over Telegram (20MB bot limit).
 static void dump_raw(void) {
-    if (!g_attached) {
-        snprintf(g_status, sizeof(g_status), "Attach first (X).");
+    if (g_gacha_addr == 0) {
+        snprintf(g_status, sizeof(g_status), "Press A first (need gacha anchor).");
         return;
     }
-    uint64_t base = GEARLIST_HEAD + g_delta;
-    #define RAW_BEFORE 0x8000
-    const uint64_t BEFORE = RAW_BEFORE;
-#define RAW_LEN 0x40000
-    const uint64_t LEN = RAW_LEN;
-    static uint8_t buf[RAW_LEN];
-    if (mem_read(base - BEFORE, buf, LEN) != 0) {
-        snprintf(g_status, sizeof(g_status), "Raw read failed @%08llX", (unsigned long long)(base - BEFORE));
+    if (mem_attach() != 0) {
+        snprintf(g_status, sizeof(g_status), "ERROR: could not attach.");
         return;
     }
+    g_attached = true;
+    uint64_t start = g_gacha_addr - 0x1000000; // 16MB before
+    uint64_t total = 0x1200000;                // +2MB after = 18MB
     FILE* f = fopen(RAW_PATH, "wb");
     if (!f) { snprintf(g_status, sizeof(g_status), "Open failed: %s", RAW_PATH); return; }
-    fwrite(buf, 1, LEN, f);
+    static uint8_t buf[0x100000];
+    uint64_t done = 0, good_end = start;
+    while (done < total) {
+        size_t chunk = total - done > sizeof(buf) ? sizeof(buf) : (size_t)(total - done);
+        if (mem_read(start + done, buf, chunk) != 0) break; // stop at unmapped
+        fwrite(buf, 1, chunk, f);
+        done += chunk;
+        good_end = start + done;
+    }
     fclose(f);
-    app_log("raw dump %llX..%llX -> %s", (unsigned long long)(base - BEFORE),
-         (unsigned long long)(base - BEFORE + LEN), RAW_PATH);
-    snprintf(g_status, sizeof(g_status), "Raw dump -> %s (list at +0x%X)",
-             RAW_PATH, (unsigned)(BEFORE + 0x40));
+    app_log("raw dump %llX..%llX -> %s", (unsigned long long)start, (unsigned long long)good_end, RAW_PATH);
+    snprintf(g_status, sizeof(g_status), "Raw %uMB @%08llX (gacha at +16MB)",
+             (unsigned)(done >> 20), (unsigned long long)start);
+    show_gear();
+    if (g_attached) mem_detach();
 }
 
 static void dump(void) {
