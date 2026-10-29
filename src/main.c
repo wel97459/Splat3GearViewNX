@@ -125,7 +125,6 @@ static void read_loadout(void) {
         // scan small windows around those anchors instead of fixed reads.
         for (int t = 0; t < 3; t++) memset(&g_worn_info[t], 0, sizeof(GearInfo));
         uint64_t rbase = found - 0x4F0; // triplet is at region+0x4F0
-        uint8_t rec[GEAR_SIZE];
         uint64_t win_addr = rbase + 0x2B0000;
         uint32_t win_len = 0x46000;     // covers head+clothes array area
         static uint8_t win[0x46000];
