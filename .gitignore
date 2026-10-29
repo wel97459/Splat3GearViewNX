@@ -2,3 +2,4 @@
 *.elf
 *.nacp
 *.map
+build/
