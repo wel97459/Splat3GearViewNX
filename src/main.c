@@ -7,7 +7,6 @@
 
 #define NRO_PATH_OUT "sdmc:/switch/Splat3GearViewNX/dump.json"
 #define LOG_PATH "sdmc:/switch/Splat3GearViewNX/log.txt"
-#define RAW_PATH "sdmc:/switch/Splat3GearViewNX/gearlist.bin"
 
 static uint64_t g_gacha_addr = 0;   // gacha block address found this read
 static uint64_t g_worn_addr[3] = {0, 0, 0}; // addresses of found worn records
@@ -260,47 +259,6 @@ static void read_loadout(void) {
 // Y: dump a raw memory window around the FOUND gacha block for offline analysis.
 // In the author's layout the gear lists sit ~15.5MB below the gacha block.
 // 18MB total so it can be sent back over Telegram (20MB bot limit).
-static void dump_raw(void) {
-    if (g_gacha_addr == 0) {
-        snprintf(g_status, sizeof(g_status), "Press A first (need gacha anchor).");
-        return;
-    }
-    if (mem_attach() != 0) {
-        snprintf(g_status, sizeof(g_status), "ERROR: could not attach.");
-        return;
-    }
-    g_attached = true;
-    uint64_t anchor = g_gacha_addr;
-    uint64_t minrec = 0;
-    for (int t = 0; t < 3; t++)
-        if (g_worn_addr[t] && (minrec == 0 || g_worn_addr[t] < minrec)) minrec = g_worn_addr[t];
-    if (minrec) anchor = minrec; // records live OUTSIDE the gacha region
-    uint64_t raddr = 0, rsize = 0; uint32_t rt = 0, rp = 0;
-    mem_query(anchor, &raddr, &rsize, &rt, &rp);
-    app_log("dump region of anchor %llX: %llX sz %llX", (unsigned long long)anchor,
-            (unsigned long long)raddr, (unsigned long long)rsize);
-    uint64_t want = anchor - 0x800000; // 8MB before the anchor
-    uint64_t start = want > raddr ? want : raddr; // clamp to mapped region
-    uint64_t total = 0x1200000; // up to 18MB
-    if (raddr && start + total > raddr + rsize) total = raddr + rsize - start;
-    FILE* f = fopen(RAW_PATH, "wb");
-    if (!f) { snprintf(g_status, sizeof(g_status), "Open failed: %s", RAW_PATH); return; }
-    static uint8_t buf[0x100000];
-    uint64_t done = 0, good_end = start;
-    while (done < total) {
-        size_t chunk = total - done > sizeof(buf) ? sizeof(buf) : (size_t)(total - done);
-        if (mem_read(start + done, buf, chunk) != 0) break; // stop at unmapped
-        fwrite(buf, 1, chunk, f);
-        done += chunk;
-        good_end = start + done;
-    }
-    fclose(f);
-    app_log("raw dump %llX..%llX -> %s", (unsigned long long)start, (unsigned long long)good_end, RAW_PATH);
-    snprintf(g_status, sizeof(g_status), "Raw %uMB @%08llX",
-             (unsigned)(done >> 20), (unsigned long long)start);
-    show_gear();
-    if (g_attached) mem_detach();
-}
 
 static void dump(void) {
     if (g_worn_info[0].id == 0 && g_worn_info[1].id == 0 && g_worn_info[2].id == 0) {
@@ -338,7 +296,6 @@ int main(void) {
             read_loadout();
         }
         if (k & HidNpadButton_X) dump();
-        if (k & HidNpadButton_Y) dump_raw();
         show_gear();
         svcSleepThread(100000000ULL); // 100ms
     }
