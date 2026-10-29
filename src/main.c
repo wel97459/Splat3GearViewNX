@@ -54,12 +54,12 @@ static void show_gear(void) {
     }
 
     printf("\n\x1b[2mControls:\n"
-           "  A: read   X: dump JSON   -: rescan from last match\n"
+           "  A: read   Up: raw fixed   -: rescan from last match\n"
            "  Y: raw mem dump   L/R: prev/next   B(+): exit\x1b[0m\n");
     consoleUpdate(NULL);
 }
 
-static void read_all(void) {
+static void read_all(int use_delta) {
     g_gear_count = 0;
     g_index = 0;
     app_log("---- read start ----");
@@ -95,28 +95,35 @@ static void read_all(void) {
 
     // Resolve heap shift: validate the fixed gacha address by content, not just
     // by whether the read succeeds (heap regions are GBs; a wrong address still maps).
+    // Up on the D-pad forces the pure author addresses with no delta at all.
     int64_t delta = 0;
     GachaSeed seeds[8];
-    int nseeds = gacha_read(GACHA_BLOCK, seeds, 8);
-    if (nseeds <= 0) nseeds = gacha_read(GACHA_BLOCK + DLC_OFFS, seeds, 8);
-    if (nseeds <= 0) {
-        snprintf(g_status, sizeof(g_status), "Fixed address wrong, scanning heap...");
-        show_gear();
-        int64_t found = mem_locate_gacha();
-        if (found < 0) {
-            uint64_t raddr = 0, rsize = 0; uint32_t rtype = 0, rperm = 0;
-            mem_query(GACHA_BLOCK, &raddr, &rsize, &rtype, &rperm);
-            snprintf(g_status, sizeof(g_status),
-                     "ERROR: gacha keys not found. map@%08llX region=%08llX sz=%08llX t=%u p=%u",
-                     (unsigned long long)GACHA_BLOCK, (unsigned long long)raddr,
-                     (unsigned long long)rsize, rtype, rperm);
+    int nseeds = 0;
+    if (use_delta) {
+        nseeds = gacha_read(GACHA_BLOCK, seeds, 8);
+        if (nseeds <= 0) nseeds = gacha_read(GACHA_BLOCK + DLC_OFFS, seeds, 8);
+        if (nseeds <= 0) {
+            snprintf(g_status, sizeof(g_status), "Fixed address wrong, scanning heap...");
             show_gear();
-            return;
+            int64_t found = mem_locate_gacha();
+            if (found < 0) {
+                uint64_t raddr = 0, rsize = 0; uint32_t rtype = 0, rperm = 0;
+                mem_query(GACHA_BLOCK, &raddr, &rsize, &rtype, &rperm);
+                snprintf(g_status, sizeof(g_status),
+                         "ERROR: gacha keys not found. map@%08llX region=%08llX sz=%08llX t=%u p=%u",
+                         (unsigned long long)GACHA_BLOCK, (unsigned long long)raddr,
+                         (unsigned long long)rsize, rtype, rperm);
+                show_gear();
+                return;
+            }
+            delta = found - (int64_t)GACHA_BLOCK;
+            snprintf(g_status, sizeof(g_status), "Heap shifted by %llX, reading...", (long long)delta);
+            show_gear();
+            nseeds = gacha_read(GACHA_BLOCK + delta, seeds, 8);
         }
-        delta = found - (int64_t)GACHA_BLOCK;
-        snprintf(g_status, sizeof(g_status), "Heap shifted by %llX, reading...", (long long)delta);
-        show_gear();
-        nseeds = gacha_read(GACHA_BLOCK + delta, seeds, 8);
+    } else {
+        app_log("raw mode: using pure author addresses, no delta");
+        nseeds = gacha_read(GACHA_BLOCK, seeds, 8);
     }
 
     char seedinfo[64] = "";
@@ -268,12 +275,13 @@ int main(void) {
             break;
         }
         if (k & HidNpadButton_A) {
-            read_all();
+            read_all(1);
             if (g_attached) mem_detach();
         }
         if (k & HidNpadButton_X) dump();
         if (k & HidNpadButton_Y) dump_raw();
         if (k & HidNpadButton_Minus) rescan_next();
+        if (k & HidNpadButton_Up) read_all(0); // raw mode: pure author addresses
         if (g_gear_count > 0) {
             if (k & HidNpadButton_R) g_index = (g_index + 1) % g_gear_count;
             if (k & HidNpadButton_L) g_index = (g_index + g_gear_count - 1) % g_gear_count;
