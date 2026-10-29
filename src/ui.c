@@ -309,7 +309,7 @@ void ui_draw(const char* status) {
     }
 
     draw_text_sized(fb, 40, 655, RGBA8_MAXALPHA(0x55, 0x5d, 0x6b), 24,
-              "A: read worn   X: export JSON   B: exit");
+              "A: read worn   X: export JSON   +: exit");
 
     fb_end(fb);
 }
