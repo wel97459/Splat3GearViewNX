@@ -19,14 +19,15 @@ def gen(type_key, master_key, json_file):
         masterid = rowid.split('_')[1]
         name = master.get(masterid)
         brand = brands.get(g['Brand'])
-        rows.append((g['Id'], name or rowid, brand or g['Brand']))
+        icon = f'romfs:/icons/{rowid}.png'
+        rows.append((g['Id'], name or rowid, brand or g['Brand'], icon))
     rows.sort(key=lambda r: r[0])
     out = []
     out.append('#include "gear_tables.h"\n')
     out.append(f'// Generated from {json_file} + EUen.json. Do not edit.\n')
     out.append(f'const GearDataEntry g_{type_key}_data[] = {{\n')
-    for id, name, brand in rows:
-        out.append(f'    {{ {id}, "{esc(name)}", "{esc(brand)}" }},\n')
+    for id, name, brand, icon in rows:
+        out.append(f'    {{ {id}, "{esc(name)}", "{esc(brand)}", "{esc(icon)}" }},\n')
     out.append('};\n')
     out.append(f'const size_t g_{type_key}_count = {len(rows)};\n')
     return ''.join(out)
@@ -52,6 +53,7 @@ typedef struct {
     uint16_t id;
     const char* name;
     const char* brand;
+    const char* icon; // romfs path to 128x128 PNG
 } GearDataEntry;
 
 extern const GearDataEntry g_head_data[];

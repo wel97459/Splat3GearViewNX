@@ -70,6 +70,11 @@ int64_t gear_locate_inventory(int type, int* out_len, uint64_t start); // short 
 int64_t gear_locate_id(int type, uint16_t want, int* out_len); // find run containing a known owned-gear ID
 
 void app_log(const char* fmt, ...);
+extern uint16_t g_loadout[3];
+extern int g_gear_count; // worn gear IDs (head/clothes/shoes), 0 = unknown
+int ui_init(void);
+void ui_exit(void);
+void ui_draw(const char* status);
 
 // ---- Seeds ----
 int gacha_read(uint64_t base, GachaSeed* out, int max); // returns count

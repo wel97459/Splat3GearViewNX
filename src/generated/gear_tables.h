@@ -8,6 +8,7 @@ typedef struct {
     uint16_t id;
     const char* name;
     const char* brand;
+    const char* icon; // romfs path to 128x128 PNG
 } GearDataEntry;
 
 extern const GearDataEntry g_head_data[];

@@ -10,7 +10,7 @@ SOURCES		:=	src src/generated
 DATA		:=
 INCLUDES	:=	src
 NO_ICON		:=	1
-ROMFS		:=
+ROMFS		:=	romfs
 
 ARCH		:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
@@ -24,7 +24,7 @@ CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions
 ASFLAGS		:=	-g $(ARCH)
 LDFLAGS		=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS		:= -lnx
+LIBS		:=	-lnx -lm
 
 LIBDIRS	:= $(PORTLIBS) $(LIBNX)
 

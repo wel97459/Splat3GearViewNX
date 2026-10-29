@@ -10,14 +10,14 @@
 #define RAW_PATH "sdmc:/switch/Splat3GearViewNX/gearlist.bin"
 
 static GearInfo g_gears[MAX_GEAR];
-static int g_gear_count = 0;
+int g_gear_count = 0;
 static int g_index = 0;
 static int64_t g_delta = 0;
 static int g_type_start[3] = {0, 0, 0};
 static int g_type_count[3] = {0, 0, 0};
 static uint64_t g_last_found = 0;   // last list address found by scanning
 static uint64_t g_gacha_addr = 0;   // gacha block address found this read
-static uint16_t g_loadout[3] = {0, 0, 0}; // worn gear IDs (head/clothes/shoes), 0 = unknown
+uint16_t g_loadout[3] = {0, 0, 0}; // worn gear IDs (head/clothes/shoes), 0 = unknown
 static int g_last_type = 0;
 static char g_status[128] = "Press A to read gear from memory";
 static bool g_attached = false;
@@ -36,163 +36,9 @@ void app_log(const char* fmt, ...) {
 }
 
 static void show_gear(void) {
-    consoleClear();
-    printf("\x1b[1;32mSplat3GearView NX\x1b[0m  -  %d gear loaded\n\n", g_gear_count);
-    printf("\x1b[2m%s\x1b[0m\n\n", g_status);
-
-    if (g_loadout[0] || g_loadout[1] || g_loadout[2]) {
-        printf("\x1b[1;36mCurrently worn:\x1b[0m\n");
-        static const char* LN[3] = { "Head  ", "Clothes", "Shoes " };
-        for (int t = 0; t < 3; t++) {
-            const GearDataEntry* e = gear_data_find(t, g_loadout[t]);
-            printf("  %s  %s (%s)\n", LN[t],
-                   e ? e->name : "?", e ? e->brand : "?");
-        }
-        printf("\n");
-    }
-
-    if (g_gear_count == 0) {
-        printf("No gear loaded yet.\n\n");
-    } else {
-        GearInfo* g = &g_gears[g_index];
-        printf("Gear %d / %d  [%s]\n\n", g_index + 1, g_gear_count, TYPE_NAMES[g->gear_type]);
-        printf("Name:   %s\n", g->name);
-        printf("Brand:  %s\n", g->brand);
-        printf("ID:     %05u\n", g->id);
-        printf("Seed:   %08X\n", g->seed);
-        printf("Rarity: %u   Slots: %u\n\n", g->rarity, g->sub_count);
-        printf("Primary:  %s\n", ability_name(g->primary));
-        printf("Sub 1:    %s\n", ability_name(g->subs[0]));
-        if (g->rarity >= 1) printf("Sub 2:    %s\n", ability_name(g->subs[1]));
-        if (g->rarity >= 2) printf("Sub 3:    %s\n", ability_name(g->subs[2]));
-    }
-
-    printf("\n\x1b[2mControls:\n"
-           "  A: worn   -: scan all   ZR: hunt IDs\n"
-           "  Y: raw mem dump   L/R: prev/next   B(+): exit\x1b[0m\n");
-    consoleUpdate(NULL);
+    ui_draw(g_status);
 }
 
-static void read_all(int use_delta) {
-    g_gear_count = 0;
-    g_index = 0;
-    app_log("---- read start ----");
-    snprintf(g_status, sizeof(g_status), "Attaching to game...");
-    show_gear();
-
-    if (mem_attach() != 0) {
-        app_log("ERROR: attach failed");
-        snprintf(g_status, sizeof(g_status), "ERROR: could not attach. Game must be running (suspended) behind hbmenu.");
-        return;
-    }
-    g_attached = true;
-
-    // Environment diagnostics (sys-botbase style): heap base, NSO base, game version
-    uint64_t heap_base = mem_heap_base();
-    uint64_t nso_base = mem_main_nso_base();
-    u64 title_id = 0;
-    u32 game_version = 0;
-    u64 pid = 0;
-    Result pmrc = pminfoInitialize();
-    if (R_SUCCEEDED(pmrc)) {
-        u64 pid2 = 0;
-        if (R_SUCCEEDED(pmdmntGetApplicationProcessId(&pid2)) && R_SUCCEEDED(pminfoGetProgramId(&title_id, pid2)))
-            pid = pid2;
-        pminfoExit();
-    }
-    NsApplicationContentMetaStatus meta[4];
-    s32 nmeta = 0;
-    if (R_FAILED(nsListApplicationContentMetaStatus(title_id, 0, meta, 4, &nmeta))) nmeta = 0;
-    for (s32 i = 0; i < nmeta; i++) {
-        if (meta[i].version > game_version) game_version = meta[i].version;
-        title_id = meta[i].application_id;
-    }
-    game_version /= 0x10000;
-    app_log("env: heap_base=%llX nso_base=%llX title=%016llX ver=%u.%u.%u",
-            (unsigned long long)heap_base, (unsigned long long)nso_base,
-            (unsigned long long)title_id,
-            game_version / 100, (game_version / 10) % 10, game_version % 10);
-    app_log("env: fixed GACHA_BLOCK=%llX GEARLIST_HEAD=%llX (author console addresses)",
-            (unsigned long long)GACHA_BLOCK, (unsigned long long)GEARLIST_HEAD);
-
-    // Resolve heap shift: validate the fixed gacha address by content, not just
-    // by whether the read succeeds (heap regions are GBs; a wrong address still maps).
-    // Up on the D-pad forces the pure author addresses with no delta at all.
-    int64_t delta = 0;
-    GachaSeed seeds[8];
-    int nseeds = 0;
-    if (use_delta) {
-        nseeds = gacha_read(GACHA_BLOCK, seeds, 8);
-        if (nseeds <= 0) nseeds = gacha_read(GACHA_BLOCK + DLC_OFFS, seeds, 8);
-        if (nseeds <= 0) {
-            snprintf(g_status, sizeof(g_status), "Fixed address wrong, scanning heap...");
-            show_gear();
-            int64_t found = mem_locate_gacha();
-            if (found < 0) {
-                uint64_t raddr = 0, rsize = 0; uint32_t rtype = 0, rperm = 0;
-                mem_query(GACHA_BLOCK, &raddr, &rsize, &rtype, &rperm);
-                snprintf(g_status, sizeof(g_status),
-                         "ERROR: gacha keys not found. map@%08llX region=%08llX sz=%08llX t=%u p=%u",
-                         (unsigned long long)GACHA_BLOCK, (unsigned long long)raddr,
-                         (unsigned long long)rsize, rtype, rperm);
-                show_gear();
-                return;
-            }
-            delta = found - (int64_t)GACHA_BLOCK;
-            snprintf(g_status, sizeof(g_status), "Heap shifted by %llX, reading...", (long long)delta);
-            show_gear();
-            nseeds = gacha_read(GACHA_BLOCK + delta, seeds, 8);
-        }
-    } else {
-        app_log("raw mode: using pure author addresses, no delta");
-        nseeds = gacha_read(GACHA_BLOCK, seeds, 8);
-    }
-
-    g_gacha_addr = GACHA_BLOCK + delta;
-    app_log("gacha anchor @%llX (delta %+llX, seeds %d)", (unsigned long long)g_gacha_addr, (long long)delta, nseeds);
-    char seedinfo[64] = "";
-    if (nseeds > 0)
-        snprintf(seedinfo, sizeof(seedinfo), " (seeds: %d, %08X)", nseeds, seeds[0].s0);
-
-    // Gear lists: try the fixed offset first; if it yields nothing, scan the
-    // heap for a run of valid structs of this type (start after the gacha block)
-    uint64_t bases[3] = { GEARLIST_HEAD + delta, GEARLIST_CLOTHES + delta, GEARLIST_SHOES + delta };
-    for (int t = 0; t < 3; t++) {
-        snprintf(g_status, sizeof(g_status), "Reading %s...", TYPE_NAMES[t]);
-        show_gear();
-        const char* status = NULL;
-        int count = 0;
-        int space = MAX_GEAR - g_gear_count;
-        uint64_t base = bases[t];
-        uint64_t start = 0x40;
-        if (!gear_read_list(g_gears + g_gear_count, space, base, start, t, &status, &count) || count == 0) {
-            // Show what's actually at the fixed address; user decides whether to scan (Minus)
-            uint8_t dbg[0x20];
-            char hex[0x20 * 3 + 8] = "";
-            if (mem_read(base + start, dbg, sizeof(dbg)) == 0) {
-                for (size_t i = 0; i < sizeof(dbg); i++)
-                    snprintf(hex + i * 3, 4, "%02X ", dbg[i]);
-            } else {
-                snprintf(hex, sizeof(hex), "unreadable");
-            }
-            app_log("%s: fixed @%llX+%llX gave 0 (status=%s) data: %s",
-                    TYPE_NAMES[t], (unsigned long long)base, (unsigned long long)start,
-                    status ? status : "0-found", hex);
-            snprintf(g_status, sizeof(g_status), "%s fixed: %s", TYPE_NAMES[t], hex);
-            g_delta = delta;
-            show_gear();
-            return;
-        }
-        g_gear_count += count;
-        app_log("%s: %d gear", TYPE_NAMES[t], count);
-        g_type_start[t] = g_gear_count - count;
-        g_type_count[t] = count;
-        if (g_last_found == 0) g_last_found = base;
-        g_last_type = t;
-    }
-    snprintf(g_status, sizeof(g_status), "Done. %d gear (delta %llX)%s",
-             g_gear_count, (long long)delta, seedinfo);
-}
 
 // A: read the 3 worn items. The equipped loadout lives near the gacha block as
 // three consecutive (u32 gearId, u32 flag) pairs - head, clothes, shoes.
@@ -435,7 +281,12 @@ static void dump(void) {
 }
 
 int main(void) {
-    consoleInit(NULL);
+    Result rc = romfsInit();
+    if (R_FAILED(rc)) app_log("romfsInit failed: %x", rc);
+    if (ui_init() != 0) {
+        app_log("ui_init failed - no framebuffer");
+        return 1;
+    }
     show_gear();
 
     PadState pad;
@@ -456,14 +307,10 @@ int main(void) {
         if (k & HidNpadButton_Y) dump_raw();
         if (k & HidNpadButton_ZR) hunt_ids();
         if (k & HidNpadButton_Minus) rescan_next();
-        if (k & HidNpadButton_Up) read_all(0); // raw mode: pure author addresses
-        if (g_gear_count > 0) {
-            if (k & HidNpadButton_R) g_index = (g_index + 1) % g_gear_count;
-            if (k & HidNpadButton_L) g_index = (g_index + g_gear_count - 1) % g_gear_count;
-        }
         show_gear();
         svcSleepThread(100000000ULL); // 100ms
     }
-    consoleExit(NULL);
+    ui_exit();
+    romfsExit();
     return 0;
 }
