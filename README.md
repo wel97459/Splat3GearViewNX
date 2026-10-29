@@ -2,13 +2,6 @@
 
 Homebrew Switch port of [LegoFigure11/Splat3GearView](https://github.com/LegoFigure11/Splat3GearView) — Splatoon 3 worn-gear reader that reads game memory **directly from the console** (no sys-botbase, no PC required). Shows your currently equipped head/clothes/shoes with abilities and seeds, and exports the leanny seed-checker JSON.
 
-Two builds:
-
-| Build | Path | Use |
-|---|---|---|
-| **NRO app** | `/switch/Splat3GearViewNX/Splat3GearViewNX.nro` (this repo) | Full framebuffer UI with gear icons; run from hbmenu (game suspended) |
-| **Ultrahand overlay** | `/switch/.overlays/Splat3GearViewNX.ovl` (separate repo: `repos/Splat3GearViewNX-ovl`) | Tesla-style menu over the *running* game (ZL+ZR+↓) |
-
 ## How it works
 
 - Attaches to the running Splatoon 3 process via `pmdmntGetApplicationProcessId` + `svcDebugActiveProcess` (Atmosphere only), read-only
