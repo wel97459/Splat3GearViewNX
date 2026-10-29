@@ -135,35 +135,22 @@ static void read_all(void) {
         uint64_t base = bases[t];
         uint64_t start = 0x40;
         if (!gear_read_list(g_gears + g_gear_count, space, base, start, t, &status, &count) || count == 0) {
-            app_log("%s: fixed offset empty (status=%s), scanning heap...", TYPE_NAMES[t], status ? status : "0-found");
-            snprintf(g_status, sizeof(g_status), "%s: fixed offset empty, scanning...", TYPE_NAMES[t]);
+            // Show what's actually at the fixed address; user decides whether to scan (Minus)
+            uint8_t dbg[0x20];
+            char hex[0x20 * 3 + 8] = "";
+            if (mem_read(base + start, dbg, sizeof(dbg)) == 0) {
+                for (size_t i = 0; i < sizeof(dbg); i++)
+                    snprintf(hex + i * 3, 4, "%02X ", dbg[i]);
+            } else {
+                snprintf(hex, sizeof(hex), "unreadable");
+            }
+            app_log("%s: fixed @%llX+%llX gave 0 (status=%s) data: %s",
+                    TYPE_NAMES[t], (unsigned long long)base, (unsigned long long)start,
+                    status ? status : "0-found", hex);
+            snprintf(g_status, sizeof(g_status), "%s fixed: %s", TYPE_NAMES[t], hex);
+            g_delta = delta;
             show_gear();
-            // Prefer a short bounded run (the player's inventory) over a long one
-            int inv_len = 0;
-            int64_t found = gear_locate_inventory(t, &inv_len, 0);
-            const char* how = "inventory-scan";
-            if (found < 0) {
-                found = gear_locate_list(t, 0);
-                how = "list-scan";
-            }
-            if (found < 0) {
-                snprintf(g_status, sizeof(g_status), "ERROR: %s list not found by scan", TYPE_NAMES[t]);
-                app_log("%s: scan failed", TYPE_NAMES[t]);
-                show_gear();
-                return;
-            }
-            base = (uint64_t)found;
-            start = 0;
-            app_log("%s: %s found @%llX (len %d, expected %llX, rel %+llX)",
-                    TYPE_NAMES[t], how, (unsigned long long)found, inv_len,
-                    (unsigned long long)bases[t], (long long)(found - (int64_t)bases[t]));
-            count = 0;
-            if (!gear_read_list(g_gears + g_gear_count, space, base, start, t, &status, &count) || count == 0) {
-                snprintf(g_status, sizeof(g_status), "ERROR: %s read failed after scan: %s",
-                         TYPE_NAMES[t], status ? status : "?");
-                show_gear();
-                return;
-            }
+            return;
         }
         g_gear_count += count;
         app_log("%s: %d gear", TYPE_NAMES[t], count);
