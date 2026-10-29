@@ -118,48 +118,55 @@ static void read_loadout(void) {
         app_log("loadout pattern not found in gacha region");
         snprintf(g_status, sizeof(g_status), "Worn gear not found in gacha region");
     } else {
-        // FAST PATH: worn records live in the gear list at stable offsets
-        // relative to the gacha region start (verified across boots):
-        // clothes = region + 0x2EA190; head/shoes = clothes +/- 0x2C020.
+        // FAST PATH: worn records live in the gear list as contiguous 0xB0
+        // records near stable offsets relative to the gacha region start
+        // (clothes ~ region+0x2EA190, head ~ -0x2C020, shoes ~ +0x2C020).
+        // The exact slot drifts in 0xB0 steps as the inventory changes, so
+        // scan small windows around those anchors instead of fixed reads.
         for (int t = 0; t < 3; t++) memset(&g_worn_info[t], 0, sizeof(GearInfo));
         uint64_t rbase = found - 0x4F0; // triplet is at region+0x4F0
-        uint64_t cls = 0;
         uint8_t rec[GEAR_SIZE];
-        uint64_t c1 = rbase + 0x2EA190;
-        if (mem_read(c1, rec, GEAR_SIZE) == 0) {
-            uint16_t gid = rec[0] | (rec[1] << 8);
-            if (gid == g_loadout[1] && gear_validate(rec)) {
-                gear_parse(&g_worn_info[1], rec, 1);
-                cls = c1;
-                g_worn_addr[1] = c1;
-                app_log("worn[1] fast @%llX (region+2EA190): seed %08X rar %u main %u sub %u/%u/%u",
-                        (unsigned long long)c1, g_worn_info[1].seed, g_worn_info[1].rarity,
-                        g_worn_info[1].primary, g_worn_info[1].subs[0],
-                        g_worn_info[1].subs[1], g_worn_info[1].subs[2]);
-            } else {
-                app_log("fast clothes @%llX: id %u (want %u) or invalid", (unsigned long long)c1, gid, g_loadout[1]);
+        uint64_t win_addr = rbase + 0x2B0000;
+        uint32_t win_len = 0x46000;     // covers head+clothes array area
+        static uint8_t win[0x46000];
+        if (mem_read(win_addr, win, win_len) == 0) {
+            for (int t = 0; t < 3; t++) {
+                for (uint32_t o = 0; o + GEAR_SIZE <= win_len; o += 4) {
+                    uint16_t gid = win[o] | (win[o + 1] << 8);
+                    if (gid != g_loadout[t] || !gear_validate(win + o)) continue;
+                    if (win[o + 0x54] < 1 || win[o + 0x68] > 3) continue;
+                    gear_parse(&g_worn_info[t], win + o, t);
+                    g_worn_addr[t] = win_addr + o;
+                    app_log("worn[%d] fast @%llX (region+%llX): seed %08X rar %u main %u sub %u/%u/%u",
+                            t, (unsigned long long)(win_addr + o),
+                            (unsigned long long)(win_addr + o - rbase),
+                            g_worn_info[t].seed, g_worn_info[t].rarity,
+                            g_worn_info[t].primary, g_worn_info[t].subs[0],
+                            g_worn_info[t].subs[1], g_worn_info[t].subs[2]);
+                    break;
+                }
             }
+        } else {
+            app_log("fast window read failed @%llX", (unsigned long long)win_addr);
         }
-        if (cls) {
-            uint64_t cand[2] = { cls - 0x2C020, cls + 0x2C020 };
-            int tt[2] = { 0, 2 };
-            for (int i = 0; i < 2; i++) {
-                if (g_worn_info[tt[i]].id) continue;
-                if (mem_read(cand[i], rec, GEAR_SIZE) == 0) {
-                    uint16_t gid = rec[0] | (rec[1] << 8);
-                    if (gid == g_loadout[tt[i]] && gear_validate(rec)) {
-                        gear_parse(&g_worn_info[tt[i]], rec, tt[i]);
-                        g_worn_addr[tt[i]] = cand[i];
-                        app_log("worn[%d] fast @%llX (clothes%+lld): seed %08X rar %u main %u sub %u/%u/%u",
-                                tt[i], (unsigned long long)cand[i],
-                                (long long)(cand[i] - cls), g_worn_info[tt[i]].seed,
-                                g_worn_info[tt[i]].rarity, g_worn_info[tt[i]].primary,
-                                g_worn_info[tt[i]].subs[0], g_worn_info[tt[i]].subs[1],
-                                g_worn_info[tt[i]].subs[2]);
-                    } else {
-                        app_log("fast slot %d @%llX: id %u (want %u) or invalid", tt[i],
-                                (unsigned long long)cand[i], gid, g_loadout[tt[i]]);
-                    }
+        // shoes window (further along the list)
+        if (!g_worn_info[2].id) {
+            uint64_t sbase = rbase + 0x314000;
+            static uint8_t swin[0x8000];
+            if (mem_read(sbase, swin, sizeof swin) == 0) {
+                for (uint32_t o = 0; o + GEAR_SIZE <= sizeof swin; o += 4) {
+                    uint16_t gid = swin[o] | (swin[o + 1] << 8);
+                    if (gid != g_loadout[2] || !gear_validate(swin + o)) continue;
+                    if (swin[o + 0x54] < 1 || swin[o + 0x68] > 3) continue;
+                    gear_parse(&g_worn_info[2], swin + o, 2);
+                    g_worn_addr[2] = sbase + o;
+                    app_log("worn[2] fast @%llX (region+%llX): seed %08X rar %u main %u sub %u/%u/%u",
+                            (unsigned long long)(sbase + o),
+                            (unsigned long long)(sbase + o - rbase),
+                            g_worn_info[2].seed, g_worn_info[2].rarity,
+                            g_worn_info[2].primary, g_worn_info[2].subs[0],
+                            g_worn_info[2].subs[1], g_worn_info[2].subs[2]);
+                    break;
                 }
             }
         }
