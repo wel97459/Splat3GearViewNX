@@ -194,13 +194,21 @@ static void read_loadout(void) {
                     (unsigned long long)ptrs[i], chased);
         }
 
-        // fallback: content search if pointers didn't yield everything
-        for (int t = 0; t < 3; t++) {
-            if (g_loadout[t] && g_worn_info[t].id == 0 && gear_find_struct(t, g_loadout[t], &g_worn_info[t]))
-                app_log("worn[%d] via fallback content scan: seed %08X rar %u main %u sub %u/%u/%u",
-                        t, g_worn_info[t].seed, g_worn_info[t].rarity,
-                        g_worn_info[t].primary, g_worn_info[t].subs[0],
-                        g_worn_info[t].subs[1], g_worn_info[t].subs[2]);
+        // fallback: content search if pointers didn't yield everything.
+        // Skip entirely when all 3 are resolved (saves 3 full-heap walks).
+        int need = 0;
+        for (int t = 0; t < 3; t++) if (g_loadout[t] && g_worn_info[t].id == 0) need++;
+        if (need == 0) {
+            app_log("all 3 worn records resolved via pointer chase; skipping fallback scan");
+        } else {
+            app_log("fallback scan for %d missing record(s)", need);
+            for (int t = 0; t < 3; t++)
+                if (g_loadout[t] && g_worn_info[t].id == 0 &&
+                    gear_find_struct(t, g_loadout[t], &g_worn_info[t]))
+                    app_log("worn[%d] via fallback content scan: seed %08X rar %u main %u sub %u/%u/%u",
+                            t, g_worn_info[t].seed, g_worn_info[t].rarity,
+                            g_worn_info[t].primary, g_worn_info[t].subs[0],
+                            g_worn_info[t].subs[1], g_worn_info[t].subs[2]);
         }
         const GearDataEntry* h = gear_data_find(0, g_loadout[0]);
         const GearDataEntry* c = gear_data_find(1, g_loadout[1]);
