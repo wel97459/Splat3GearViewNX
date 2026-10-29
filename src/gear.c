@@ -166,7 +166,13 @@ bool dump_json(const char* path, const GearInfo* gears, int count) {
 // Fast heap-only search for a single gear's full 0xB0 record by ID.
 // The owned-gear structs live inside the svc heap (confirmed by logs), so we
 // skip the huge non-heap regions that made the full hunt slow.
+// Optional scan bounds (0 = unbounded). When set, gear_find_struct only
+// walks mapped regions inside [lo, hi) — used to bound the search to the
+// gacha's heap region, which is user-independent and ~24MB.
+uint64_t g_scan_lo = 0, g_scan_hi = 0;
+
 bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
+    uint64_t addr = g_scan_lo ? g_scan_lo : 0x8000000ULL;
     uint64_t addr = 0x8000000ULL;
     static uint8_t buf[0x40000];
     int found = 0;
@@ -222,8 +228,10 @@ bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
         uint64_t next = raddr + rsize;
         if (next <= addr) break;
         addr = next;
+        if (g_scan_hi && addr >= g_scan_hi) break; // bounded
     }
-    app_log("gear_find_struct type %u id %u: %d candidates", type, id, found);
+    app_log("gear_find_struct type %u id %u: %d candidates (bounds %llX..%llX)",
+            type, id, found, (unsigned long long)g_scan_lo, (unsigned long long)g_scan_hi);
     // group by payload; score each group: subs*4 + aligned bonus per member
     int best_g = -1, best_score = -1;
     for (int i = 0; i < nsig; i++) {

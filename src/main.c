@@ -280,6 +280,10 @@ static void read_loadout(void) {
             // most distinctive item first (clothes), then DERIVE the others
             // by stride — far faster and immune to scan junk.
             static const int order[3] = {1, 0, 2};
+            // pass 1: bound to the gacha region (user-independent, ~24MB):
+            // the gear list lives in the same allocation region as the RNG
+            // block. Pass 2 below widens to the full heap only if needed.
+            if (raddr && rsize) { g_scan_lo = raddr; g_scan_hi = raddr + rsize; }
             for (int oi = 0; oi < 3; oi++) {
                 int t = order[oi];
                 if (!(g_loadout[t] && g_worn_info[t].id == 0)) continue;
@@ -310,6 +314,25 @@ static void read_loadout(void) {
                     }
                 }
             }
+            // pass 2: widen to the full heap only if something is still missing
+            int still = 0;
+            for (int t = 0; t < 3; t++) if (g_loadout[t] && g_worn_info[t].id == 0) still++;
+            if (still) {
+                app_log("region-bounded scan missed %d; widening to full heap", still);
+                g_scan_lo = 0; g_scan_hi = 0;
+                for (int oi = 0; oi < 3; oi++) {
+                    int t = order[oi];
+                    if (!(g_loadout[t] && g_worn_info[t].id == 0)) continue;
+                    if (gear_find_struct(t, g_loadout[t], &g_worn_info[t])) {
+                        g_worn_addr[t] = g_gear_found_addr;
+                        app_log("worn[%d] via full scan @%llX: seed %08X rar %u main %u sub %u/%u/%u",
+                                t, (unsigned long long)g_gear_found_addr, g_worn_info[t].seed,
+                                g_worn_info[t].rarity, g_worn_info[t].primary,
+                                g_worn_info[t].subs[0], g_worn_info[t].subs[1], g_worn_info[t].subs[2]);
+                    }
+                }
+            }
+            g_scan_lo = 0; g_scan_hi = 0;
         }
         const GearDataEntry* h = gear_data_find(0, g_loadout[0]);
         const GearDataEntry* c = gear_data_find(1, g_loadout[1]);
