@@ -47,4 +47,3 @@ Requires devkitPro devkitA64 + libnx.
 ## Notes
 
 - On-device diagnostics go to `sd:/switch/Splat3GearViewNX/log.txt` — the primary debugging artifact; screen stays clean by design
-- Builds are distributed hash-named via the file host (`https://dl.nvme.sh/<sha8>.nro`), never via Telegram attachments (stale-cache risk)
