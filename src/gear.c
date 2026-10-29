@@ -119,8 +119,8 @@ int64_t gear_locate_list(int type, uint64_t start) {
         if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return -1;
         if (addr != raddr) addr = raddr;
         bool readable = (rperm & Perm_R) != 0;
-        bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
-        if (readable && !is_code && rsize >= 0x100000) {
+        bool is_heap = (rtype == MemType_Heap);
+        if (readable && is_heap && rsize >= 0x100000) {
             uint64_t skip = (uint64_t)start > raddr ? (uint64_t)start - raddr : 0;
             if (skip >= rsize) { uint64_t next = raddr + rsize; if (next <= addr) break; addr = next; continue; }
             uint64_t pos = skip;
@@ -165,8 +165,8 @@ int64_t gear_locate_inventory(int type, int* out_len, uint64_t start) {
         if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return -1;
         if (addr != raddr) addr = raddr;
         bool readable = (rperm & Perm_R) != 0;
-        bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
-        if (readable && !is_code && rsize >= 0x100000) {
+        bool is_heap = (rtype == MemType_Heap);
+        if (readable && is_heap && rsize >= 0x100000) {
             uint64_t skip = (uint64_t)start > raddr ? (uint64_t)start - raddr : 0;
             if (skip >= rsize) { uint64_t next = raddr + rsize; if (next <= addr) break; addr = next; continue; }
             uint64_t pos = skip;

@@ -78,9 +78,17 @@ static void read_all(int use_delta) {
     uint64_t nso_base = mem_main_nso_base();
     u64 title_id = 0;
     u32 game_version = 0;
+    u64 pid = 0;
+    Result pmrc = pminfoInitialize();
+    if (R_SUCCEEDED(pmrc)) {
+        u64 pid2 = 0;
+        if (R_SUCCEEDED(pmdmntGetApplicationProcessId(&pid2)) && R_SUCCEEDED(pminfoGetProgramId(&title_id, pid2)))
+            pid = pid2;
+        pminfoExit();
+    }
     NsApplicationContentMetaStatus meta[4];
     s32 nmeta = 0;
-    if (R_FAILED(nsListApplicationContentMetaStatus(0, 0, meta, 4, &nmeta))) nmeta = 0;
+    if (R_FAILED(nsListApplicationContentMetaStatus(title_id, 0, meta, 4, &nmeta))) nmeta = 0;
     for (s32 i = 0; i < nmeta; i++) {
         if (meta[i].version > game_version) game_version = meta[i].version;
         title_id = meta[i].application_id;
