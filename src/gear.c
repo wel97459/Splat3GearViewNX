@@ -173,7 +173,6 @@ uint64_t g_scan_lo = 0, g_scan_hi = 0;
 
 bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
     uint64_t addr = g_scan_lo ? g_scan_lo : 0x8000000ULL;
-    uint64_t addr = 0x8000000ULL;
     static uint8_t buf[0x40000];
     int found = 0;
     // Real gear records exist as 2+ IDENTICAL copies (same abilities + seed)
