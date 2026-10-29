@@ -169,14 +169,18 @@ bool dump_json(const char* path, const GearInfo* gears, int count) {
 bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
     uint64_t addr = 0x8000000ULL;
     static uint8_t buf[0x40000];
+    int found = 0;
+    int best_score = -1;
+    uint64_t best_addr = 0;
+    GearInfo best_gi;
     while (addr != 0) {
         uint64_t raddr, rsize;
         uint32_t rtype, rperm;
-        if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return false;
+        if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) break;
         if (addr != raddr) addr = raddr;
         bool readable = (rperm & Perm_R) != 0;
         bool is_heap = (rtype == MemType_Heap);
-        if (readable && is_heap && rsize >= 0x100000) {
+        if (readable && is_heap && rsize >= GEAR_SIZE) {
             uint64_t pos = 0;
             while (pos < rsize) {
                 size_t n = rsize - pos;
@@ -186,8 +190,26 @@ bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
                         uint16_t gid = buf[o] | (buf[o+1] << 8);
                         if (gid != id) continue;
                         if (!gear_validate(buf + o)) continue;
-                        gear_parse(out, buf + o, type);
-                        return true;
+                        uint8_t prim = buf[o + 0x54];
+                        uint8_t scnt = buf[o + 0x68];
+                        // score: real worn gear has a rolled primary and unlocked subs;
+                        // default/db copies have primary 0 and sub_count 0
+                        int score = scnt * 4 + (prim != 0 ? 2 : 0);
+                        bool subs_ok = prim != 0;
+                        for (int i = 0; i < scnt; i++)
+                            if (buf[o + 0x6C + i * 4] < 1) subs_ok = false;
+                        if (subs_ok) score += 2;
+                        found++;
+                        app_log("cand[%d] id %u @%llX+0x%llX: prim %u cnt %u subs %u/%u/%u seed %08X score %d",
+                                found, id, (unsigned long long)(raddr + pos + o),
+                                (unsigned long long)o, prim, scnt,
+                                buf[o + 0x6C], buf[o + 0x70], buf[o + 0x74],
+                                rd32(buf + o, 0x80), score);
+                        if (score > best_score) {
+                            best_score = score;
+                            best_addr = raddr + pos + o;
+                            gear_parse(&best_gi, buf + o, type);
+                        }
                     }
                     pos += n;
                     if (n == sizeof(buf) && pos < rsize) pos -= GEAR_SIZE;
@@ -200,5 +222,9 @@ bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
         if (next <= addr) break;
         addr = next;
     }
-    return false;
+    app_log("gear_find_struct type %u id %u: %d candidates, best score %d @%llX",
+            type, id, found, best_score, (unsigned long long)best_addr);
+    if (best_score < 0) return false;
+    *out = best_gi;
+    return true;
 }
