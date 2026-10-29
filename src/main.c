@@ -102,21 +102,59 @@ static void read_loadout(void) {
         app_log("loadout pattern not found in gacha region");
         snprintf(g_status, sizeof(g_status), "Worn gear not found in gacha region");
     } else {
-        // Pull the full records (seed, rarity, abilities) for each worn item
+        // The loadout record carries a pointer array just BEFORE the triplet
+        // (dump: pointers at triplet-0x50..triplet-0x08). Those point at the
+        // real gear objects elsewhere in the heap — dereference them and read
+        // the full 0xB0 record at the target, matched by ID.
+        uint64_t ptrs[12]; int nptr = 0;
+        uint8_t pb[0x60];
+        uint64_t pscan = found - 0x60;
+        if (mem_read(pscan, pb, sizeof pb) == 0) {
+            for (int i = 0; i + 8 <= (int)sizeof pb; i += 8) {
+                uint64_t p = 0;
+                for (int k = 7; k >= 0; k--) p = (p << 8) | pb[i + k];
+                if (p > 0x1000000000ULL && p < 0x800000000000ULL && nptr < 12)
+                    ptrs[nptr++] = p;
+            }
+        }
+        app_log("record pointers: %d found before loadout @%llX", nptr, (unsigned long long)pscan);
+        for (int t = 0; t < 3; t++) memset(&g_worn_info[t], 0, sizeof(GearInfo));
+        for (int i = 0; i < nptr; i++) {
+            for (int soff = 0; soff <= 0x10; soff += 0x10) {
+                uint64_t target = ptrs[i] + soff;
+                uint64_t ta, ts; uint32_t tt, tp;
+                if (mem_query(target, &ta, &ts, &tt, &tp) != 0 || !(tp & Perm_R)) {
+                    if (soff == 0) app_log("ptr[%d] %llX unmapped", i, (unsigned long long)ptrs[i]);
+                    continue;
+                }
+                uint8_t gb[GEAR_SIZE];
+                if (mem_read(target, gb, GEAR_SIZE) != 0) continue;
+                uint16_t gid = gb[0] | (gb[1] << 8);
+                if (gid == 0) continue;
+                for (int t = 0; t < 3; t++) {
+                    if (gid != g_loadout[t] || g_worn_info[t].id != 0) continue;
+                    if (!gear_validate(gb)) {
+                        app_log("ptr[%d] %llX+0x%X: id %u matches worn[%d] but invalid struct", i,
+                                (unsigned long long)ptrs[i], soff, gid, t);
+                        continue;
+                    }
+                    gear_parse(&g_worn_info[t], gb, t);
+                    app_log("worn[%d] via ptr[%d] %llX+0x%X: seed %08X rar %u main %u sub %u/%u/%u exp %u",
+                            t, i, (unsigned long long)ptrs[i], soff, g_worn_info[t].seed,
+                            g_worn_info[t].rarity, g_worn_info[t].primary,
+                            g_worn_info[t].subs[0], g_worn_info[t].subs[1],
+                            g_worn_info[t].subs[2], g_worn_info[t].exp);
+                }
+                break;
+            }
+        }
+        // fallback: content search if pointers didn't yield everything
         for (int t = 0; t < 3; t++) {
-            memset(&g_worn_info[t], 0, sizeof(GearInfo));
-            g_worn_info[t].id = g_loadout[t];
-            if (g_loadout[t] && gear_find_struct(t, g_loadout[t], &g_worn_info[t])) {
-                app_log("worn[%d] full record: seed %08X rar %u main %u sub %u/%u/%u exp %u",
+            if (g_loadout[t] && g_worn_info[t].id == 0 && gear_find_struct(t, g_loadout[t], &g_worn_info[t]))
+                app_log("worn[%d] via fallback content scan: seed %08X rar %u main %u sub %u/%u/%u",
                         t, g_worn_info[t].seed, g_worn_info[t].rarity,
                         g_worn_info[t].primary, g_worn_info[t].subs[0],
-                        g_worn_info[t].subs[1], g_worn_info[t].subs[2],
-                        g_worn_info[t].exp);
-                char hex[3 * 0x2C + 8] = "";
-                for (int i = 0x50; i < 0x7C; i++)
-                    snprintf(hex + (i - 0x50) * 3, 4, "%02X ", g_worn_info[t].raw[i]);
-                app_log("worn[%d] raw 0x50..0x7C: %s", t, hex);
-            }
+                        g_worn_info[t].subs[1], g_worn_info[t].subs[2]);
         }
         const GearDataEntry* h = gear_data_find(0, g_loadout[0]);
         const GearDataEntry* c = gear_data_find(1, g_loadout[1]);
