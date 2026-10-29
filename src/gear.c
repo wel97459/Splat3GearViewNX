@@ -129,6 +129,10 @@ int gacha_read(uint64_t base, GachaSeed* out, int max) {
 // Returns the run start address, sets *out_len. -1 if not found.
 
 // leanny.github.io/splat3seedchecker settings format
+// leanny.github.io/splat3seedchecker settings JSON (matches upstream
+// WebsiteFormat/MainWindow.cs): MainSkill is remapped for abilities >=
+// IntensifyAction; ExSkillArray = sub ability - 1; subs are the RAW stored
+// values (upstream exports all 3 slots regardless of unlock state).
 bool dump_json(const char* path, const GearInfo* gears, int count) {
     FILE* f = fopen(path, "w");
     if (!f) return false;
@@ -139,14 +143,17 @@ bool dump_json(const char* path, const GearInfo* gears, int count) {
         bool first = true;
         for (int i = 0; i < count; i++) {
             if (gears[i].gear_type != t) continue;
-            uint8_t p = gears[i].primary;
-            int main_skill = p - 1;
+            const uint8_t* d = gears[i].raw;
+            uint8_t p = d[0x54];
+            int main_skill;
             if (p - 1 >= ABIL_INTENSIFY_ACTION)
-                main_skill = p - ABIL_INTENSIFY_ACTION + 99;
+                main_skill = (p - ABIL_INTENSIFY_ACTION) + 99;
+            else
+                main_skill = p - 1;
+            int s1 = d[0x6C] - 1, s2 = d[0x70] - 1, s3 = d[0x74] - 1;
             fprintf(f, "%s\n    \"%u\": { \"MainSkill\": %d, \"RandomContext\": %u, "
                        "\"ExDrinksArray\": [], \"ExSkillArray\": [%d, %d, %d] }",
-                    first ? "" : ",", gears[i].id, main_skill, gears[i].seed,
-                    gears[i].subs[0] - 1, gears[i].subs[1] - 1, gears[i].subs[2] - 1);
+                    first ? "" : ",", gears[i].id, main_skill, gears[i].seed, s1, s2, s3);
             first = false;
         }
         fprintf(f, "\n  }");

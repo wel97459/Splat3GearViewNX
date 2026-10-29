@@ -178,7 +178,7 @@ static void dump(void) {
         return;
     }
     if (dump_json(NRO_PATH_OUT, g_worn_info, 3))
-        snprintf(g_status, sizeof(g_status), "Dumped 3 worn items to %s", NRO_PATH_OUT);
+        snprintf(g_status, sizeof(g_status), "Exported worn gear -> leanny seed checker");
     else
         snprintf(g_status, sizeof(g_status), "Dump failed: %s", NRO_PATH_OUT);
     show_gear();
