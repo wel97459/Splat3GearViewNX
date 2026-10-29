@@ -12,6 +12,10 @@ static GearInfo g_gears[MAX_GEAR];
 static int g_gear_count = 0;
 static int g_index = 0;
 static int64_t g_delta = 0;
+static int g_type_start[3] = {0, 0, 0};
+static int g_type_count[3] = {0, 0, 0};
+static uint64_t g_last_found = 0;   // last list address found by scanning
+static int g_last_type = 0;
 static char g_status[128] = "Press A to read gear from memory";
 static bool g_attached = false;
 
@@ -50,9 +54,8 @@ static void show_gear(void) {
     }
 
     printf("\n\x1b[2mControls:\n"
-           "  A: read gear   L/R: prev/next\n"
-           "  X: dump JSON to %s\n"
-           "  B: detach & exit\x1b[0m\n", NRO_PATH_OUT);
+           "  A: read   X: dump JSON   -: rescan from last match\n"
+           "  Y: raw mem dump   L/R: prev/next   B(+): exit\x1b[0m\n");
     consoleUpdate(NULL);
 }
 
@@ -117,10 +120,10 @@ static void read_all(void) {
             show_gear();
             // Prefer a short bounded run (the player's inventory) over a long one
             int inv_len = 0;
-            int64_t found = gear_locate_inventory(t, &inv_len);
+            int64_t found = gear_locate_inventory(t, &inv_len, 0);
             const char* how = "inventory-scan";
             if (found < 0) {
-                found = gear_locate_list(t);
+                found = gear_locate_list(t, 0);
                 how = "list-scan";
             }
             if (found < 0) {
@@ -144,9 +147,68 @@ static void read_all(void) {
         }
         g_gear_count += count;
         app_log("%s: %d gear", TYPE_NAMES[t], count);
+        g_type_start[t] = g_gear_count - count;
+        g_type_count[t] = count;
+        if (g_last_found == 0) g_last_found = base;
+        g_last_type = t;
     }
     snprintf(g_status, sizeof(g_status), "Done. %d gear (delta %llX)%s",
              g_gear_count, (long long)delta, seedinfo);
+}
+
+// Minus: continue scanning for the current type's list after the last found address
+static void rescan_next(void) {
+    if (g_last_found == 0) { snprintf(g_status, sizeof(g_status), "Nothing scanned yet."); return; }
+    int t = g_last_type;
+    snprintf(g_status, sizeof(g_status), "Scanning %s after last match...", TYPE_NAMES[t]);
+    show_gear();
+    if (mem_attach() != 0) {
+        snprintf(g_status, sizeof(g_status), "ERROR: could not attach.");
+        return;
+    }
+    g_attached = true;
+    uint64_t start = g_last_found + GEAR_SIZE;
+    int inv_len = 0;
+    int64_t found = gear_locate_inventory(t, &inv_len, start);
+    const char* how = "inventory-scan";
+    if (found < 0) { found = gear_locate_list(t, start); how = "list-scan"; }
+    if (found < 0) {
+        snprintf(g_status, sizeof(g_status), "%s: no further match found", TYPE_NAMES[t]);
+        app_log("%s: rescan after %llX found nothing", TYPE_NAMES[t], (unsigned long long)start);
+        show_gear();
+        if (g_attached) mem_detach();
+        return;
+    }
+    g_last_found = (uint64_t)found;
+    app_log("%s: rescan %s @%llX (len %d)", TYPE_NAMES[t], how,
+            (unsigned long long)found, inv_len);
+    // Read the new list into a temp buffer
+    static GearInfo tmp[128];
+    const char* status = NULL;
+    int count = 0;
+    if (!gear_read_list(tmp, 128, (uint64_t)found, 0, t, &status, &count) || count == 0) {
+        snprintf(g_status, sizeof(g_status), "ERROR: rescan read failed: %s", status ? status : "?");
+        show_gear();
+        if (g_attached) mem_detach();
+        return;
+    }
+    // Replace this type's segment in the main array
+    int s = g_type_start[t], oldc = g_type_count[t];
+    int tail = g_gear_count - (s + oldc);
+    int newc = count;
+    int shift = newc - oldc;
+    if (shift != 0 && tail > 0)
+        memmove(g_gears + s + newc, g_gears + s + oldc, tail * sizeof(GearInfo));
+    memcpy(g_gears + s, tmp, newc * sizeof(GearInfo));
+    g_type_count[t] = newc;
+    g_gear_count += shift;
+    // Fix up start offsets of later types
+    for (int u = t + 1; u < 3; u++) g_type_start[u] += shift;
+    if (g_index >= g_gear_count) g_index = g_gear_count ? g_gear_count - 1 : 0;
+    snprintf(g_status, sizeof(g_status), "%s: %d gear @%llX (%s)", TYPE_NAMES[t], newc,
+             (unsigned long long)found, how);
+    show_gear();
+    if (g_attached) mem_detach();
 }
 
 // Y: dump a raw memory window around the (shifted) gear list for offline analysis
@@ -204,6 +266,7 @@ int main(void) {
         }
         if (k & HidNpadButton_X) dump();
         if (k & HidNpadButton_Y) dump_raw();
+        if (k & HidNpadButton_Minus) rescan_next();
         if (g_gear_count > 0) {
             if (k & HidNpadButton_R) g_index = (g_index + 1) % g_gear_count;
             if (k & HidNpadButton_L) g_index = (g_index + g_gear_count - 1) % g_gear_count;

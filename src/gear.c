@@ -110,8 +110,8 @@ int gacha_read(uint64_t base, GachaSeed* out, int max) {
 
 // Scan the heap for a run of valid 0xB0-stride gear structs whose IDs resolve
 // in this type's name table. Returns the address of the first gear, or -1.
-int64_t gear_locate_list(int type) {
-    uint64_t addr = 0x8000000ULL;
+int64_t gear_locate_list(int type, uint64_t start) {
+    uint64_t addr = start ? start : 0x8000000ULL;
     static uint8_t buf[0x10000];
     while (addr != 0) {
         uint64_t raddr, rsize;
@@ -121,7 +121,9 @@ int64_t gear_locate_list(int type) {
         bool readable = (rperm & Perm_R) != 0;
         bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
         if (readable && !is_code && rsize >= 0x100000) {
-            uint64_t pos = 0;
+            uint64_t skip = (uint64_t)start > raddr ? (uint64_t)start - raddr : 0;
+            if (skip >= rsize) { uint64_t next = raddr + rsize; if (next <= addr) break; addr = next; continue; }
+            uint64_t pos = skip;
             while (pos < rsize) {
                 size_t n = rsize - pos;
                 if (n > sizeof(buf)) n = sizeof(buf);
@@ -153,8 +155,8 @@ int64_t gear_locate_list(int type) {
 // that's the player's owned-gear inventory, not the full item database
 // (which is one huge run). IDs must resolve in this type's table.
 // Returns the address of the first gear, or -1.
-int64_t gear_locate_inventory(int type, int* out_len) {
-    uint64_t addr = 0x8000000ULL;
+int64_t gear_locate_inventory(int type, int* out_len, uint64_t start) {
+    uint64_t addr = start ? start : 0x8000000ULL;
     static uint8_t buf[0x10000];
     if (out_len) *out_len = 0;
     while (addr != 0) {
@@ -165,7 +167,9 @@ int64_t gear_locate_inventory(int type, int* out_len) {
         bool readable = (rperm & Perm_R) != 0;
         bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
         if (readable && !is_code && rsize >= 0x100000) {
-            uint64_t pos = 0;
+            uint64_t skip = (uint64_t)start > raddr ? (uint64_t)start - raddr : 0;
+            if (skip >= rsize) { uint64_t next = raddr + rsize; if (next <= addr) break; addr = next; continue; }
+            uint64_t pos = skip;
             while (pos < rsize) {
                 size_t n = rsize - pos;
                 if (n > sizeof(buf)) n = sizeof(buf);

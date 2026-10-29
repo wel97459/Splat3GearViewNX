@@ -63,8 +63,8 @@ bool gear_validate(const uint8_t* d);
 void gear_parse(GearInfo* g, const uint8_t* data, uint8_t gear_type);
 bool gear_read_list(GearInfo* out, int max, uint64_t base, uint64_t start_pos, uint8_t type,
                     const char** status, int* count);
-int64_t gear_locate_list(int type); // heap-scan for a run of valid gear structs of this type
-int64_t gear_locate_inventory(int type, int* out_len); // short bounded run = owned gear
+int64_t gear_locate_list(int type, uint64_t start); // heap-scan for a run of valid gear structs of this type
+int64_t gear_locate_inventory(int type, int* out_len, uint64_t start); // short bounded run = owned gear
 
 // ---- Seeds ----
 int gacha_read(uint64_t base, GachaSeed* out, int max); // returns count
