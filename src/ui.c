@@ -190,7 +190,6 @@ void ui_draw(const char* status) {
     fill(fb, RGBA8_MAXALPHA(0x14, 0x16, 0x1c));
 
     draw_text(fb, 40, 28, RGBA8_MAXALPHA(0x6e, 0xe7, 0x60), "Splat3GearView NX");
-    draw_text(fb, 40, 68, RGBA8_MAXALPHA(0x9a, 0xa3, 0xb5), status ? status : "");
 
     // 3 worn cards
     static const char* LN[3] = { "Head", "Clothes", "Shoes" };
@@ -212,19 +211,26 @@ void ui_draw(const char* status) {
             snprintf(line, sizeof(line), "%s: %s", LN[t], e->name);
             draw_text(fb, x - 20, y + 150, RGBA8_MAXALPHA(0xf2, 0xf5, 0xfa), line);
             draw_text(fb, x - 20, y + 186, RGBA8_MAXALPHA(0x9a, 0xa3, 0xb5), e->brand);
+            const GearInfo* gi = &g_worn_info[t];
+            if (gi->id) {
+                // abilities
+                char main_line[64], sub_line[96], meta_line[64];
+                snprintf(main_line, sizeof(main_line), "Main: %s", ability_name(gi->primary));
+                snprintf(sub_line, sizeof(sub_line), "Subs: %s / %s / %s",
+                         ability_name(gi->subs[0]), ability_name(gi->subs[1]), ability_name(gi->subs[2]));
+                snprintf(meta_line, sizeof(meta_line), "Rarity %u  Seed %08X  Exp %u",
+                         gi->rarity, gi->seed, gi->exp);
+                draw_text(fb, x - 20, y + 218, RGBA8_MAXALPHA(0xd8, 0xdc, 0xe4), main_line);
+                draw_text(fb, x - 20, y + 248, RGBA8_MAXALPHA(0xb8, 0xc0, 0xcc), sub_line);
+                draw_text(fb, x - 20, y + 278, RGBA8_MAXALPHA(0x8f, 0x98, 0xa8), meta_line);
+            }
         } else {
             draw_text(fb, x, y + 150, RGBA8_MAXALPHA(0x9a, 0xa3, 0xb5), "- none -");
         }
     }
 
-    if (g_gear_count > 0) {
-        char line[64];
-        snprintf(line, sizeof(line), "Lists: %d gear", g_gear_count);
-        draw_text(fb, 950, 68, RGBA8_MAXALPHA(0x9a, 0xa3, 0xb5), line);
-    }
-
     draw_text(fb, 40, 660, RGBA8_MAXALPHA(0x55, 0x5d, 0x6b),
-              "A: read worn   -: scan lists   ZR: hunt IDs   Y: raw dump   B: exit");
+              "A: read worn   Y: raw dump   B: exit");
 
     fb_end(fb);
 }

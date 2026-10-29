@@ -9,20 +9,12 @@
 #define LOG_PATH "sdmc:/switch/Splat3GearViewNX/log.txt"
 #define RAW_PATH "sdmc:/switch/Splat3GearViewNX/gearlist.bin"
 
-static GearInfo g_gears[MAX_GEAR];
-int g_gear_count = 0;
-static int g_index = 0;
-static int64_t g_delta = 0;
-static int g_type_start[3] = {0, 0, 0};
-static int g_type_count[3] = {0, 0, 0};
-static uint64_t g_last_found = 0;   // last list address found by scanning
 static uint64_t g_gacha_addr = 0;   // gacha block address found this read
 uint16_t g_loadout[3] = {0, 0, 0}; // worn gear IDs (head/clothes/shoes), 0 = unknown
-static int g_last_type = 0;
+GearInfo g_worn_info[3];          // full parsed records for the worn items (seed etc.)
 static char g_status[128] = "Press A to read gear from memory";
 static bool g_attached = false;
 
-static const char* TYPE_NAMES[3] = { "Headgear", "Clothes", "Shoes" };
 
 void app_log(const char* fmt, ...) {
     FILE* f = fopen(LOG_PATH, "a");
@@ -110,6 +102,17 @@ static void read_loadout(void) {
         app_log("loadout pattern not found in gacha region");
         snprintf(g_status, sizeof(g_status), "Worn gear not found in gacha region");
     } else {
+        // Pull the full records (seed, rarity, abilities) for each worn item
+        for (int t = 0; t < 3; t++) {
+            memset(&g_worn_info[t], 0, sizeof(GearInfo));
+            g_worn_info[t].id = g_loadout[t];
+            if (g_loadout[t] && gear_find_struct(t, g_loadout[t], &g_worn_info[t]))
+                app_log("worn[%d] full record: seed %08X rar %u main %u sub %u/%u/%u exp %u",
+                        t, g_worn_info[t].seed, g_worn_info[t].rarity,
+                        g_worn_info[t].primary, g_worn_info[t].subs[0],
+                        g_worn_info[t].subs[1], g_worn_info[t].subs[2],
+                        g_worn_info[t].exp);
+        }
         const GearDataEntry* h = gear_data_find(0, g_loadout[0]);
         const GearDataEntry* c = gear_data_find(1, g_loadout[1]);
         const GearDataEntry* s = gear_data_find(2, g_loadout[2]);
@@ -123,116 +126,8 @@ static void read_loadout(void) {
 // Debug: hunt for the raw u16 values of the anchor gear IDs in ALL readable
 // regions, logging address + surrounding bytes for each hit. Tells us whether
 // the game stores these IDs at all (and in what container).
-static void hunt_ids(void) {
-    static const uint16_t IDS[3] = { 1029, 8034, 3001 };
-    app_log("hunt: starting raw-ID search");
-    if (mem_attach() != 0) { snprintf(g_status, sizeof(g_status), "ERROR: could not attach."); return; }
-    g_attached = true;
-    static uint8_t buf[0x40000];
-    for (int w = 0; w < 3; w++) {
-        uint16_t want = IDS[w];
-        int hits = 0, logged = 0;
-        uint64_t addr = 0x8000000ULL;
-        while (addr != 0) {
-            uint64_t raddr, rsize; uint32_t rtype, rperm;
-            if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) break;
-            if (addr != raddr) addr = raddr;
-            bool readable = (rperm & Perm_R) != 0;
-            bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
-            if (readable && !is_code && rsize >= 0x100000) {
-                uint64_t pos = 0;
-                while (pos < rsize) {
-                    size_t n = rsize - pos;
-                    if (n > sizeof(buf)) n = sizeof(buf);
-                    if (mem_read(raddr + pos, buf, n) == 0) {
-                        for (size_t o = 0; o + 2 <= n; o++) {
-                            if ((buf[o] | (buf[o+1] << 8)) != want) continue;
-                            hits++;
-                            if (logged < 48) {
-                                logged++;
-                                uint64_t ha = raddr + pos + o;
-                                size_t s0 = o >= 8 ? o - 8 : 0;
-                                size_t s1 = o + 24 <= n ? o + 24 : n;
-                                char hex[(24 + 16) * 3 + 8] = "";
-                                for (size_t k = s0; k < s1; k++)
-                                    snprintf(hex + (k - s0) * 3, 4, "%02X ", buf[k]);
-                                app_log("hit %u @%llX (u32=%s) ctx: %s", want,
-                                        (unsigned long long)ha,
-                                        (o + 4 <= n && (buf[o+2] | (buf[o+3] << 8)) == 0) ? "yes" : "no",
-                                        hex);
-                            }
-                        }
-                        pos += n;
-                        if (n == sizeof(buf) && pos < rsize) pos -= 24; // keep context across chunk edge
-                    } else {
-                        pos += n;
-                    }
-                }
-            }
-            uint64_t next = raddr + rsize;
-            if (next <= addr) break;
-            addr = next;
-        }
-        app_log("hunt: ID %u total hits %d", want, hits);
-    }
-    snprintf(g_status, sizeof(g_status), "Hunt done, see log.txt");
-    show_gear();
-    if (g_attached) mem_detach();
-}
 
 // Minus: scan all three gear types, anchored on known owned-gear IDs first
-static void rescan_next(void) {
-    static const uint16_t ANCHOR_IDS[3] = { 1029, 8034, 3001 }; // Coral Cap / Fancyfish Stitch / Orange Arrows
-    app_log("minus pressed: starting 3-type ID scan");
-    snprintf(g_status, sizeof(g_status), "Scanning for owned gear (ID anchors)...");
-    show_gear();
-    if (mem_attach() != 0) {
-        snprintf(g_status, sizeof(g_status), "ERROR: could not attach.");
-        return;
-    }
-    g_attached = true;
-    static GearInfo out[MAX_GEAR];
-    int total = 0;
-    int counts[3] = {0, 0, 0};
-    for (int t = 0; t < 3; t++) {
-        snprintf(g_status, sizeof(g_status), "Scanning %s (anchor ID %u)...", TYPE_NAMES[t], ANCHOR_IDS[t]);
-        show_gear();
-        int run_len = 0;
-        int64_t found = gear_locate_id(t, ANCHOR_IDS[t], &run_len);
-        const char* how = "id-scan";
-        if (found < 0) {
-            found = gear_locate_inventory(t, &run_len, 0);
-            how = "inventory-scan";
-        }
-        if (found < 0) { found = gear_locate_list(t, 0); how = "list-scan"; }
-        if (found < 0) {
-            app_log("%s: scan found nothing", TYPE_NAMES[t]);
-            continue;
-        }
-        const char* status = NULL;
-        int count = 0;
-        if (!gear_read_list(out + total, MAX_GEAR - total, (uint64_t)found, 0, t, &status, &count) || count == 0) {
-            app_log("%s: %s @%llX but read failed: %s", TYPE_NAMES[t], how,
-                    (unsigned long long)found, status ? status : "?");
-            continue;
-        }
-        app_log("%s: %s @%llX (run %d) -> %d gear", TYPE_NAMES[t], how,
-                (unsigned long long)found, run_len, count);
-        counts[t] = count;
-        total += count;
-        g_last_found = (uint64_t)found;
-        g_last_type = t;
-    }
-    memcpy(g_gears, out, total * sizeof(GearInfo));
-    g_gear_count = total;
-    int s = 0;
-    for (int t = 0; t < 3; t++) { g_type_start[t] = s; g_type_count[t] = counts[t]; s += counts[t]; }
-    g_index = 0;
-    snprintf(g_status, sizeof(g_status), "Scanned: %d gear (h%d c%d s%d)", total,
-             counts[0], counts[1], counts[2]);
-    show_gear();
-    if (g_attached) mem_detach();
-}
 
 // Y: dump a raw memory window around the FOUND gacha block for offline analysis.
 // In the author's layout the gear lists sit ~15.5MB below the gacha block.
@@ -273,11 +168,15 @@ static void dump_raw(void) {
 }
 
 static void dump(void) {
-    if (g_gear_count == 0) { snprintf(g_status, sizeof(g_status), "Nothing to dump."); return; }
-    if (dump_json(NRO_PATH_OUT, g_gears, g_gear_count))
-        snprintf(g_status, sizeof(g_status), "Dumped %d gear to %s", g_gear_count, NRO_PATH_OUT);
+    if (g_worn_info[0].id == 0 && g_worn_info[1].id == 0 && g_worn_info[2].id == 0) {
+        snprintf(g_status, sizeof(g_status), "Read the worn items first (A).");
+        return;
+    }
+    if (dump_json(NRO_PATH_OUT, g_worn_info, 3))
+        snprintf(g_status, sizeof(g_status), "Dumped 3 worn items to %s", NRO_PATH_OUT);
     else
         snprintf(g_status, sizeof(g_status), "Dump failed: %s", NRO_PATH_OUT);
+    show_gear();
 }
 
 int main(void) {
@@ -305,8 +204,6 @@ int main(void) {
         }
         if (k & HidNpadButton_X) dump();
         if (k & HidNpadButton_Y) dump_raw();
-        if (k & HidNpadButton_ZR) hunt_ids();
-        if (k & HidNpadButton_Minus) rescan_next();
         show_gear();
         svcSleepThread(100000000ULL); // 100ms
     }

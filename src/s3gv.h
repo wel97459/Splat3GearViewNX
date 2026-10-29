@@ -65,13 +65,11 @@ bool gear_validate(const uint8_t* d);
 void gear_parse(GearInfo* g, const uint8_t* data, uint8_t gear_type);
 bool gear_read_list(GearInfo* out, int max, uint64_t base, uint64_t start_pos, uint8_t type,
                     const char** status, int* count);
-int64_t gear_locate_list(int type, uint64_t start); // heap-scan for a run of valid gear structs of this type
-int64_t gear_locate_inventory(int type, int* out_len, uint64_t start); // short bounded run = owned gear
-int64_t gear_locate_id(int type, uint16_t want, int* out_len); // find run containing a known owned-gear ID
+bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out); // fast heap-only search for one gear's full record
 
 void app_log(const char* fmt, ...);
-extern uint16_t g_loadout[3];
-extern int g_gear_count; // worn gear IDs (head/clothes/shoes), 0 = unknown
+extern uint16_t g_loadout[3]; // worn gear IDs (head/clothes/shoes), 0 = unknown
+extern GearInfo g_worn_info[3]; // full parsed records for the worn items
 int ui_init(void);
 void ui_exit(void);
 void ui_draw(const char* status);

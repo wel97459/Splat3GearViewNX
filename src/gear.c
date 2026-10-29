@@ -110,159 +110,18 @@ int gacha_read(uint64_t base, GachaSeed* out, int max) {
 
 // Scan the heap for a run of valid 0xB0-stride gear structs whose IDs resolve
 // in this type's name table. Returns the address of the first gear, or -1.
-int64_t gear_locate_list(int type, uint64_t start) {
-    uint64_t addr = start ? start : 0x8000000ULL;
-    static uint8_t buf[0x10000];
-    while (addr != 0) {
-        uint64_t raddr, rsize;
-        uint32_t rtype, rperm;
-        if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return -1;
-        if (addr != raddr) addr = raddr;
-        bool readable = (rperm & Perm_R) != 0;
-        bool is_heap = (rtype == MemType_Heap);
-        if (readable && is_heap && rsize >= 0x100000) {
-            uint64_t skip = (uint64_t)start > raddr ? (uint64_t)start - raddr : 0;
-            if (skip >= rsize) { uint64_t next = raddr + rsize; if (next <= addr) break; addr = next; continue; }
-            uint64_t pos = skip;
-            while (pos < rsize) {
-                size_t n = rsize - pos;
-                if (n > sizeof(buf)) n = sizeof(buf);
-                if (mem_read(raddr + pos, buf, n) == 0) {
-                    for (size_t o = 0; o + 0x2B0 <= n; o++) {
-                        if (!gear_validate(buf + o)) continue;
-                        if (!gear_validate(buf + o + GEAR_SIZE)) continue;
-                        if (!gear_validate(buf + o + 2 * GEAR_SIZE)) continue;
-                        uint16_t id0 = buf[o] | (buf[o+1] << 8);
-                        uint16_t id1 = buf[o + GEAR_SIZE] | (buf[o + GEAR_SIZE + 1] << 8);
-                        if (gear_data_find(type, id0) && gear_data_find(type, id1)) {
-                            return (int64_t)(raddr + pos + o);
-                        }
-                    }
-                }
-                pos += n;
-                if (n == sizeof(buf) && pos < rsize) pos -= 0x2B0; // overlap
-            }
-        }
-        uint64_t next = raddr + rsize;
-        if (next <= addr) break;
-        addr = next;
-    }
-    return -1;
-}
 
 // Scan the heap for a short "island" run of valid 0xB0-stride gear structs:
 // invalid struct immediately before, run of valid structs, then invalid —
 // that's the player's owned-gear inventory, not the full item database
 // (which is one huge run). IDs must resolve in this type's table.
 // Returns the address of the first gear, or -1.
-int64_t gear_locate_inventory(int type, int* out_len, uint64_t start) {
-    uint64_t addr = start ? start : 0x8000000ULL;
-    static uint8_t buf[0x10000];
-    if (out_len) *out_len = 0;
-    while (addr != 0) {
-        uint64_t raddr, rsize;
-        uint32_t rtype, rperm;
-        if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return -1;
-        if (addr != raddr) addr = raddr;
-        bool readable = (rperm & Perm_R) != 0;
-        bool is_heap = (rtype == MemType_Heap);
-        if (readable && is_heap && rsize >= 0x100000) {
-            uint64_t skip = (uint64_t)start > raddr ? (uint64_t)start - raddr : 0;
-            if (skip >= rsize) { uint64_t next = raddr + rsize; if (next <= addr) break; addr = next; continue; }
-            uint64_t pos = skip;
-            while (pos < rsize) {
-                size_t n = rsize - pos;
-                if (n > sizeof(buf)) n = sizeof(buf);
-                if (mem_read(raddr + pos, buf, n) == 0) {
-                    for (size_t o = GEAR_SIZE; o + 0x2B0 <= n; o++) {
-                        if (!gear_validate(buf + o)) continue;
-                        if (gear_validate(buf + o - GEAR_SIZE)) continue; // must be preceded by invalid
-                        // extend the run
-                        size_t len = 0;
-                        while (o + len * GEAR_SIZE + GEAR_SIZE <= n && len < 64 &&
-                               gear_validate(buf + o + len * GEAR_SIZE))
-                            len++;
-                        if (len == 0 || len >= 64) continue;
-                        if (o + len * GEAR_SIZE + GEAR_SIZE > n) continue; // run hit chunk end, skip
-                        if (gear_validate(buf + o + len * GEAR_SIZE)) continue; // must be followed by invalid
-                        uint16_t id0 = buf[o] | (buf[o+1] << 8);
-                        uint16_t id1 = buf[o + GEAR_SIZE] | (buf[o + GEAR_SIZE + 1] << 8);
-                        if (gear_data_find(type, id0) && gear_data_find(type, id1)) {
-                            if (out_len) *out_len = (int)len;
-                            return (int64_t)(raddr + pos + o);
-                        }
-                    }
-                }
-                pos += n;
-                if (n == sizeof(buf) && pos < rsize) pos -= 0x2B0;
-            }
-        }
-        uint64_t next = raddr + rsize;
-        if (next <= addr) break;
-        addr = next;
-    }
-    return -1;
-}
 
 // Scan all readable non-code regions for a valid gear struct with a specific
 // known ID (e.g. a piece the user actually owns), then expand to the full run
 // boundaries. The exact-ID requirement makes false positives negligible, so we
 // don't restrict to heap regions (the lists may live in game-mapped memory).
 // Returns the run start address, sets *out_len. -1 if not found.
-int64_t gear_locate_id(int type, uint16_t want, int* out_len) {
-    uint64_t addr = 0x8000000ULL;
-    static uint8_t buf[0x40000];
-    if (out_len) *out_len = 0;
-    while (addr != 0) {
-        uint64_t raddr, rsize;
-        uint32_t rtype, rperm;
-        if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return -1;
-        if (addr != raddr) addr = raddr;
-        bool readable = (rperm & Perm_R) != 0;
-        bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
-        if (readable && !is_code && rsize >= 0x100000) {
-            uint64_t pos = 0;
-            while (pos < rsize) {
-                size_t n = rsize - pos;
-                if (n > sizeof(buf)) n = sizeof(buf);
-                if (mem_read(raddr + pos, buf, n) == 0) { pos += n; continue; }
-                for (size_t o = 0; o + GEAR_SIZE <= n; o++) {
-                    uint16_t id = buf[o] | (buf[o+1] << 8);
-                    if (id != want) continue;
-                    if (!gear_validate(buf + o)) continue;
-                    uint64_t cand = raddr + pos + o;
-                    // Expand backward: previous struct valid?
-                    uint64_t run_start = cand;
-                    uint8_t prev[GEAR_SIZE];
-                    for (int k = 1; k <= 64; k++) {
-                        if (mem_read(cand - (uint64_t)k * GEAR_SIZE, prev, GEAR_SIZE) != 0) break;
-                        if (!gear_validate(prev)) break;
-                        run_start = cand - (uint64_t)k * GEAR_SIZE;
-                    }
-                    // Expand forward
-                    int len = (int)((cand - run_start) / GEAR_SIZE) + 1;
-                    uint8_t nxt[GEAR_SIZE];
-                    for (;;) {
-                        if (mem_read(run_start + (uint64_t)len * GEAR_SIZE, nxt, GEAR_SIZE) != 0) break;
-                        if (!gear_validate(nxt)) break;
-                        len++;
-                        if (len > 256) break;
-                    }
-                    if (out_len) *out_len = len;
-                    return (int64_t)run_start;
-                }
-                pos += n;
-                if (n == sizeof(buf) && pos < rsize) pos -= GEAR_SIZE;
-            }
-        }
-        app_log("id-scan: walked region %llX..%llX (t=%u)", (unsigned long long)raddr,
-                (unsigned long long)(raddr + rsize), rtype);
-        uint64_t next = raddr + rsize;
-        if (next <= addr) break;
-        addr = next;
-    }
-    return -1;
-}
 
 // leanny.github.io/splat3seedchecker settings format
 bool dump_json(const char* path, const GearInfo* gears, int count) {
@@ -290,4 +149,44 @@ bool dump_json(const char* path, const GearInfo* gears, int count) {
     fprintf(f, "\n}\n");
     fclose(f);
     return true;
+}
+
+// Fast heap-only search for a single gear's full 0xB0 record by ID.
+// The owned-gear structs live inside the svc heap (confirmed by logs), so we
+// skip the huge non-heap regions that made the full hunt slow.
+bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
+    uint64_t addr = 0x8000000ULL;
+    static uint8_t buf[0x40000];
+    while (addr != 0) {
+        uint64_t raddr, rsize;
+        uint32_t rtype, rperm;
+        if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return false;
+        if (addr != raddr) addr = raddr;
+        bool readable = (rperm & Perm_R) != 0;
+        bool is_heap = (rtype == MemType_Heap);
+        if (readable && is_heap && rsize >= 0x100000) {
+            uint64_t pos = 0;
+            while (pos < rsize) {
+                size_t n = rsize - pos;
+                if (n > sizeof(buf)) n = sizeof(buf);
+                if (mem_read(raddr + pos, buf, n) == 0) {
+                    for (size_t o = 0; o + GEAR_SIZE <= n; o++) {
+                        uint16_t gid = buf[o] | (buf[o+1] << 8);
+                        if (gid != id) continue;
+                        if (!gear_validate(buf + o)) continue;
+                        gear_parse(out, buf + o, type);
+                        return true;
+                    }
+                    pos += n;
+                    if (n == sizeof(buf) && pos < rsize) pos -= GEAR_SIZE;
+                } else {
+                    pos += n;
+                }
+            }
+        }
+        uint64_t next = raddr + rsize;
+        if (next <= addr) break;
+        addr = next;
+    }
+    return false;
 }
