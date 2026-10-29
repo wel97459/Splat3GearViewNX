@@ -192,19 +192,21 @@ bool gear_find_struct(uint8_t type, uint16_t id, GearInfo* out) {
                         if (!gear_validate(buf + o)) continue;
                         uint8_t prim = buf[o + 0x54];
                         uint8_t scnt = buf[o + 0x68];
-                        // score: real worn gear has a rolled primary and unlocked subs;
-                        // default/db copies have primary 0 and sub_count 0
-                        int score = scnt * 4 + (prim != 0 ? 2 : 0);
-                        bool subs_ok = prim != 0;
+                        if (prim < 1 || scnt > 3) continue; // game limits: 3 subs max
+                        // score ONLY unlocked subs; stale bytes beyond sub_count are noise
+                        int score = scnt * 4 + 2;
+                        bool subs_ok = true;
                         for (int i = 0; i < scnt; i++)
-                            if (buf[o + 0x6C + i * 4] < 1) subs_ok = false;
+                            if (buf[o + 0x6C + i * 4] < 1 || buf[o + 0x6C + i * 4] > 14) subs_ok = false;
                         if (subs_ok) score += 2;
+                        uint64_t cand_addr = raddr + pos + o;
+                        if ((cand_addr & 7) == 0) score += 4; // real objects are aligned
                         found++;
-                        app_log("cand[%d] id %u @%llX+0x%llX: prim %u cnt %u subs %u/%u/%u seed %08X score %d",
-                                found, id, (unsigned long long)(raddr + pos + o),
-                                (unsigned long long)o, prim, scnt,
-                                buf[o + 0x6C], buf[o + 0x70], buf[o + 0x74],
-                                rd32(buf + o, 0x80), score);
+                        if (score >= 10)
+                            app_log("cand[%d] id %u @%llX: prim %u cnt %u subs %u/%u/%u seed %08X score %d",
+                                    found, id, (unsigned long long)cand_addr, prim, scnt,
+                                    buf[o + 0x6C], buf[o + 0x70], buf[o + 0x74],
+                                    rd32(buf + o, 0x80), score);
                         if (score > best_score) {
                             best_score = score;
                             best_addr = raddr + pos + o;
