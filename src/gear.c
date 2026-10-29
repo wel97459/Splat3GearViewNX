@@ -148,6 +148,58 @@ int64_t gear_locate_list(int type) {
     return -1;
 }
 
+// Scan the heap for a short "island" run of valid 0xB0-stride gear structs:
+// invalid struct immediately before, run of valid structs, then invalid —
+// that's the player's owned-gear inventory, not the full item database
+// (which is one huge run). IDs must resolve in this type's table.
+// Returns the address of the first gear, or -1.
+int64_t gear_locate_inventory(int type, int* out_len) {
+    uint64_t addr = 0x8000000ULL;
+    static uint8_t buf[0x10000];
+    if (out_len) *out_len = 0;
+    while (addr != 0) {
+        uint64_t raddr, rsize;
+        uint32_t rtype, rperm;
+        if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return -1;
+        if (addr != raddr) addr = raddr;
+        bool readable = (rperm & Perm_R) != 0;
+        bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
+        if (readable && !is_code && rsize >= 0x100000) {
+            uint64_t pos = 0;
+            while (pos < rsize) {
+                size_t n = rsize - pos;
+                if (n > sizeof(buf)) n = sizeof(buf);
+                if (mem_read(raddr + pos, buf, n) == 0) {
+                    for (size_t o = GEAR_SIZE; o + 0x2B0 <= n; o++) {
+                        if (!gear_validate(buf + o)) continue;
+                        if (gear_validate(buf + o - GEAR_SIZE)) continue; // must be preceded by invalid
+                        // extend the run
+                        size_t len = 0;
+                        while (o + len * GEAR_SIZE + GEAR_SIZE <= n && len < 64 &&
+                               gear_validate(buf + o + len * GEAR_SIZE))
+                            len++;
+                        if (len == 0 || len >= 64) continue;
+                        if (o + len * GEAR_SIZE + GEAR_SIZE > n) continue; // run hit chunk end, skip
+                        if (gear_validate(buf + o + len * GEAR_SIZE)) continue; // must be followed by invalid
+                        uint16_t id0 = buf[o] | (buf[o+1] << 8);
+                        uint16_t id1 = buf[o + GEAR_SIZE] | (buf[o + GEAR_SIZE + 1] << 8);
+                        if (gear_data_find(type, id0) && gear_data_find(type, id1)) {
+                            if (out_len) *out_len = (int)len;
+                            return (int64_t)(raddr + pos + o);
+                        }
+                    }
+                }
+                pos += n;
+                if (n == sizeof(buf) && pos < rsize) pos -= 0x2B0;
+            }
+        }
+        uint64_t next = raddr + rsize;
+        if (next <= addr) break;
+        addr = next;
+    }
+    return -1;
+}
+
 // leanny.github.io/splat3seedchecker settings format
 bool dump_json(const char* path, const GearInfo* gears, int count) {
     FILE* f = fopen(path, "w");

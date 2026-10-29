@@ -113,9 +113,16 @@ static void read_all(void) {
         uint64_t start = 0x40;
         if (!gear_read_list(g_gears + g_gear_count, space, base, start, t, &status, &count) || count == 0) {
             app_log("%s: fixed offset empty (status=%s), scanning heap...", TYPE_NAMES[t], status ? status : "0-found");
-            snprintf(g_status, sizeof(g_status), "%s: fixed offset empty, scanning heap...", TYPE_NAMES[t]);
+            snprintf(g_status, sizeof(g_status), "%s: fixed offset empty, scanning...", TYPE_NAMES[t]);
             show_gear();
-            int64_t found = gear_locate_list(t);
+            // Prefer a short bounded run (the player's inventory) over a long one
+            int inv_len = 0;
+            int64_t found = gear_locate_inventory(t, &inv_len);
+            const char* how = "inventory-scan";
+            if (found < 0) {
+                found = gear_locate_list(t);
+                how = "list-scan";
+            }
             if (found < 0) {
                 snprintf(g_status, sizeof(g_status), "ERROR: %s list not found by scan", TYPE_NAMES[t]);
                 app_log("%s: scan failed", TYPE_NAMES[t]);
@@ -124,8 +131,8 @@ static void read_all(void) {
             }
             base = (uint64_t)found;
             start = 0;
-            app_log("%s: scan found list @%llX (expected %llX, rel %+llX)",
-                    TYPE_NAMES[t], (unsigned long long)found,
+            app_log("%s: %s found @%llX (len %d, expected %llX, rel %+llX)",
+                    TYPE_NAMES[t], how, (unsigned long long)found, inv_len,
                     (unsigned long long)bases[t], (long long)(found - (int64_t)bases[t]));
             count = 0;
             if (!gear_read_list(g_gears + g_gear_count, space, base, start, t, &status, &count) || count == 0) {
