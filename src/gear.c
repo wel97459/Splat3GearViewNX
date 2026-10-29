@@ -1,4 +1,5 @@
 #include "s3gv.h"
+#include <switch.h>
 #include "generated/gear_tables.h"
 #include <stdio.h>
 #include <string.h>
@@ -42,10 +43,10 @@ void gear_parse(GearInfo* g, const uint8_t* data, uint8_t gear_type) {
     if (e) { g->name = e->name; g->brand = e->brand; }
 }
 
-bool gear_read_list(GearInfo* out, int max, uint64_t base, uint8_t type,
+bool gear_read_list(GearInfo* out, int max, uint64_t base, uint64_t start_pos, uint8_t type,
                     const char** status, int* count) {
     const int CHUNK = 10;
-    uint64_t pos = 0x40;
+    uint64_t pos = start_pos;
     uint8_t buf[GEAR_SIZE * CHUNK];
     int n = 0;
     bool valid = true;
@@ -105,6 +106,46 @@ int gacha_read(uint64_t base, GachaSeed* out, int max) {
         n++;
     }
     return n;
+}
+
+// Scan the heap for a run of valid 0xB0-stride gear structs whose IDs resolve
+// in this type's name table. Returns the address of the first gear, or -1.
+int64_t gear_locate_list(int type) {
+    uint64_t addr = 0x8000000ULL;
+    static uint8_t buf[0x10000];
+    while (addr != 0) {
+        uint64_t raddr, rsize;
+        uint32_t rtype, rperm;
+        if (mem_query(addr, &raddr, &rsize, &rtype, &rperm) != 0) return -1;
+        if (addr != raddr) addr = raddr;
+        bool readable = (rperm & Perm_R) != 0;
+        bool is_code = (rtype == MemType_CodeStatic || rtype == MemType_ModuleCodeStatic);
+        if (readable && !is_code && rsize >= 0x100000) {
+            uint64_t pos = 0;
+            while (pos < rsize) {
+                size_t n = rsize - pos;
+                if (n > sizeof(buf)) n = sizeof(buf);
+                if (mem_read(raddr + pos, buf, n) == 0) {
+                    for (size_t o = 0; o + 0x2B0 <= n; o++) {
+                        if (!gear_validate(buf + o)) continue;
+                        if (!gear_validate(buf + o + GEAR_SIZE)) continue;
+                        if (!gear_validate(buf + o + 2 * GEAR_SIZE)) continue;
+                        uint16_t id0 = buf[o] | (buf[o+1] << 8);
+                        uint16_t id1 = buf[o + GEAR_SIZE] | (buf[o + GEAR_SIZE + 1] << 8);
+                        if (gear_data_find(type, id0) && gear_data_find(type, id1)) {
+                            return (int64_t)(raddr + pos + o);
+                        }
+                    }
+                }
+                pos += n;
+                if (n == sizeof(buf) && pos < rsize) pos -= 0x2B0; // overlap
+            }
+        }
+        uint64_t next = raddr + rsize;
+        if (next <= addr) break;
+        addr = next;
+    }
+    return -1;
 }
 
 // leanny.github.io/splat3seedchecker settings format

@@ -61,8 +61,9 @@ int64_t mem_locate_gacha(void); // heap-scan for the gacha key block; -1 if not 
 // ---- Gear parsing ----
 bool gear_validate(const uint8_t* d);
 void gear_parse(GearInfo* g, const uint8_t* data, uint8_t gear_type);
-bool gear_read_list(GearInfo* out, int max, uint64_t base, uint8_t type,
+bool gear_read_list(GearInfo* out, int max, uint64_t base, uint64_t start_pos, uint8_t type,
                     const char** status, int* count);
+int64_t gear_locate_list(int type); // heap-scan for a run of valid gear structs of this type
 
 // ---- Seeds ----
 int gacha_read(uint64_t base, GachaSeed* out, int max); // returns count

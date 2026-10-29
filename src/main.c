@@ -100,7 +100,8 @@ static void read_all(void) {
     if (nseeds > 0)
         snprintf(seedinfo, sizeof(seedinfo), " (seeds: %d, %08X)", nseeds, seeds[0].s0);
 
-    // Gear lists
+    // Gear lists: try the fixed offset first; if it yields nothing, scan the
+    // heap for a run of valid structs of this type (start after the gacha block)
     uint64_t bases[3] = { GEARLIST_HEAD + delta, GEARLIST_CLOTHES + delta, GEARLIST_SHOES + delta };
     for (int t = 0; t < 3; t++) {
         snprintf(g_status, sizeof(g_status), "Reading %s...", TYPE_NAMES[t]);
@@ -108,28 +109,34 @@ static void read_all(void) {
         const char* status = NULL;
         int count = 0;
         int space = MAX_GEAR - g_gear_count;
-        if (!gear_read_list(g_gears + g_gear_count, space, bases[t] + 0x40, t, &status, &count)) {
-            snprintf(g_status, sizeof(g_status), "ERROR reading %s: %s", TYPE_NAMES[t], status ? status : "?");
-            return;
-        }
-        if (count == 0) {
-            // Diagnose: show what's actually at the list start
-            uint8_t dbg[0x20];
-            char hex[0x20 * 3 + 8] = "";
-            if (mem_read(bases[t] + 0x40, dbg, sizeof(dbg)) == 0) {
-                for (size_t i = 0; i < sizeof(dbg); i++)
-                    snprintf(hex + i * 3, 4, "%02X ", dbg[i]);
-            } else {
-                snprintf(hex, sizeof(hex), "unreadable");
-            }
-            app_log("%s: 0 found @%llX+40: %s", TYPE_NAMES[t], (unsigned long long)bases[t], hex);
-            snprintf(g_status, sizeof(g_status), "%s: 0 found @%08llX+40: %s",
-                     TYPE_NAMES[t], (unsigned long long)bases[t], hex);
-            g_delta = delta;
+        uint64_t base = bases[t];
+        uint64_t start = 0x40;
+        if (!gear_read_list(g_gears + g_gear_count, space, base, start, t, &status, &count) || count == 0) {
+            app_log("%s: fixed offset empty (status=%s), scanning heap...", TYPE_NAMES[t], status ? status : "0-found");
+            snprintf(g_status, sizeof(g_status), "%s: fixed offset empty, scanning heap...", TYPE_NAMES[t]);
             show_gear();
-            return;
+            int64_t found = gear_locate_list(t);
+            if (found < 0) {
+                snprintf(g_status, sizeof(g_status), "ERROR: %s list not found by scan", TYPE_NAMES[t]);
+                app_log("%s: scan failed", TYPE_NAMES[t]);
+                show_gear();
+                return;
+            }
+            base = (uint64_t)found;
+            start = 0;
+            app_log("%s: scan found list @%llX (expected %llX, rel %+llX)",
+                    TYPE_NAMES[t], (unsigned long long)found,
+                    (unsigned long long)bases[t], (long long)(found - (int64_t)bases[t]));
+            count = 0;
+            if (!gear_read_list(g_gears + g_gear_count, space, base, start, t, &status, &count) || count == 0) {
+                snprintf(g_status, sizeof(g_status), "ERROR: %s read failed after scan: %s",
+                         TYPE_NAMES[t], status ? status : "?");
+                show_gear();
+                return;
+            }
         }
         g_gear_count += count;
+        app_log("%s: %d gear", TYPE_NAMES[t], count);
     }
     snprintf(g_status, sizeof(g_status), "Done. %d gear (delta %llX)%s",
              g_gear_count, (long long)delta, seedinfo);
